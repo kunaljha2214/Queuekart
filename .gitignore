@@ -1,0 +1,23 @@
+node_modules/
+.env
+.env.*
+!.env.example
+**/.env
+*.log
+.DS_Store
+Thumbs.db
+
+# Accidental Windows artifact (reserved name); never commit
+mobile/NUL
+
+# Secrets & local config
+server/.env
+mobile/.env
+*.keystore
+!mobile/android/app/debug.keystore
+
+# Builds
+mobile/android/app/build/
+mobile/android/build/
+mobile/ios/build/
+mobile/.gradle/
