@@ -1,7 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { client } from '../services/api';
 import { subscribeShopQueue } from '../services/socket';
+import { appAlert } from '../utils/appAlert';
 
 export default function OwnerDashboard({ navigation }) {
   const { logout } = useAuth();
@@ -55,7 +55,7 @@ export default function OwnerDashboard({ navigation }) {
         setShops(list);
         if (list.length) setShopId(list[0]._id);
       } catch (e) {
-        if (alive) Alert.alert('Error', e.response?.data?.message || e.message);
+        if (alive) appAlert('Error', e.response?.data?.message || e.message);
       } finally {
         if (alive) setLoading(false);
       }
@@ -77,7 +77,7 @@ export default function OwnerDashboard({ navigation }) {
           if (!cancelled) setQueue(payload);
         });
       } catch (e) {
-        if (!cancelled) Alert.alert('Queue', e.response?.data?.message || e.message);
+        if (!cancelled) appAlert('Queue', e.response?.data?.message || e.message);
       }
     })();
     return () => {
@@ -104,7 +104,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/next`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -113,7 +113,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/complete/${entryId}`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -127,9 +127,9 @@ export default function OwnerDashboard({ navigation }) {
         description: editDescription.trim(),
       });
       setShops((prev) => prev.map((s) => (s._id === shopId ? data.shop : s)));
-      Alert.alert('Saved', 'Shop details updated.');
+      appAlert('Saved', 'Shop details updated.');
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     } finally {
       setSavingShop(false);
     }
@@ -137,7 +137,7 @@ export default function OwnerDashboard({ navigation }) {
 
   async function addWalkInCustomer() {
     if (!walkInName.trim()) {
-      Alert.alert('Required', 'Enter walk-in customer name.');
+      appAlert('Required', 'Enter walk-in customer name.');
       return;
     }
     try {
@@ -149,7 +149,7 @@ export default function OwnerDashboard({ navigation }) {
       setWalkInName('');
       setShowWalkInInput(false);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     } finally {
       setAddingWalkIn(false);
     }
@@ -294,7 +294,6 @@ const styles = StyleSheet.create({
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   PermissionsAndroid,
   Platform,
   ScrollView,
@@ -358,7 +357,7 @@ export default function OwnerDashboard({ navigation }) {
         setShops(list);
         if (list.length) setShopId(list[0]._id);
       } catch (e) {
-        if (alive) Alert.alert('Error', e.response?.data?.message || e.message);
+        if (alive) appAlert('Error', e.response?.data?.message || e.message);
       } finally {
         if (alive) setLoading(false);
       }
@@ -380,7 +379,7 @@ export default function OwnerDashboard({ navigation }) {
           if (!cancelled) setQueue(payload);
         });
       } catch (e) {
-        if (!cancelled) Alert.alert('Queue', e.response?.data?.message || e.message);
+        if (!cancelled) appAlert('Queue', e.response?.data?.message || e.message);
       }
     })();
     return () => {
@@ -409,9 +408,9 @@ export default function OwnerDashboard({ navigation }) {
       const payload = { name: editName.trim(), address: editAddress.trim(), description: editDescription.trim() };
       const { data } = await client.patch(`/shops/${shopId}`, payload);
       setShops((prev) => prev.map((s) => (s._id === shopId ? data.shop : s)));
-      Alert.alert('Saved', 'Shop details updated.');
+      appAlert('Saved', 'Shop details updated.');
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     } finally {
       setSavingShop(false);
     }
@@ -422,7 +421,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/next`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -431,12 +430,15 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/complete/${entryId}`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
   async function addWalkIn() {
-    if (!walkInName.trim()) return Alert.alert('Required', 'Enter walk-in customer name.');
+    if (!walkInName.trim()) {
+      appAlert('Required', 'Enter walk-in customer name.');
+      return;
+    }
     try {
       setAddingWalkIn(true);
       const { data } = await client.post(`/queues/${shopId}/owner/walk-in`, {
@@ -446,7 +448,7 @@ export default function OwnerDashboard({ navigation }) {
       setWalkInName('');
       setShowWalkIn(false);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     } finally {
       setAddingWalkIn(false);
     }
@@ -525,8 +527,8 @@ export default function OwnerDashboard({ navigation }) {
           style={styles.outlineBtn}
           onPress={async () => {
             const ok = await ensureLocationPermission();
-            if (!ok) Alert.alert('Permission', 'Location permission denied');
-            else Alert.alert('Location', 'Location permission available');
+            if (!ok) appAlert('Permission', 'Location permission denied');
+            else appAlert('Location', 'Location permission available');
           }}
         >
           <Text style={styles.outlineText}>Refresh location</Text>
@@ -570,7 +572,6 @@ const styles = StyleSheet.create({
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   PermissionsAndroid,
   Platform,
   ScrollView,
@@ -646,7 +647,7 @@ export default function OwnerDashboard({ navigation }) {
         setShops(list);
         if (list.length) setShopId(list[0]._id);
       } catch (e) {
-        Alert.alert('Error', e.response?.data?.message || e.message);
+        appAlert('Error', e.response?.data?.message || e.message);
       } finally {
         if (alive) setLoading(false);
       }
@@ -696,7 +697,7 @@ export default function OwnerDashboard({ navigation }) {
           if (!cancelled) setQueue(payload);
         });
       } catch (e) {
-        if (!cancelled) Alert.alert('Queue', e.response?.data?.message || e.message);
+        if (!cancelled) appAlert('Queue', e.response?.data?.message || e.message);
       }
     }
     sync();
@@ -725,7 +726,7 @@ export default function OwnerDashboard({ navigation }) {
       setRefreshingLocation(true);
       const ok = await ensureLocationPermission();
       if (!ok) {
-        Alert.alert('Permission needed', 'Location permission is required.');
+        appAlert('Permission needed', 'Location permission is required.');
         return;
       }
       await new Promise((resolve) => {
@@ -735,7 +736,7 @@ export default function OwnerDashboard({ navigation }) {
             resolve();
           },
           () => {
-            Alert.alert('Location error', 'Could not fetch current location.');
+            appAlert('Location error', 'Could not fetch current location.');
             resolve();
           },
           { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
@@ -748,7 +749,7 @@ export default function OwnerDashboard({ navigation }) {
 
   async function createShop() {
     if (!shopNameInput.trim() || !shopAddressInput.trim() || !shopCoords) {
-      Alert.alert('Check form', 'Name, address, and location are required.');
+      appAlert('Check form', 'Name, address, and location are required.');
       return;
     }
     try {
@@ -764,7 +765,7 @@ export default function OwnerDashboard({ navigation }) {
       setShopNameInput('');
       setShopAddressInput('');
     } catch (e) {
-      Alert.alert('Create shop failed', e.response?.data?.message || e.message);
+      appAlert('Create shop failed', e.response?.data?.message || e.message);
     } finally {
       setCreatingShop(false);
     }
@@ -773,7 +774,7 @@ export default function OwnerDashboard({ navigation }) {
   async function updateShopInfo() {
     if (!shopId) return;
     if (!editName.trim() || !editAddress.trim()) {
-      Alert.alert('Check form', 'Shop name and address are required.');
+      appAlert('Check form', 'Shop name and address are required.');
       return;
     }
     try {
@@ -789,9 +790,9 @@ export default function OwnerDashboard({ navigation }) {
       }
       const { data } = await client.patch(`/shops/${shopId}`, payload);
       setShops((prev) => prev.map((s) => (s._id === shopId ? data.shop : s)));
-      Alert.alert('Updated', 'Shop info saved.');
+      appAlert('Updated', 'Shop info saved.');
     } catch (e) {
-      Alert.alert('Update failed', e.response?.data?.message || e.message);
+      appAlert('Update failed', e.response?.data?.message || e.message);
     } finally {
       setUpdatingShop(false);
     }
@@ -802,7 +803,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/next`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -811,13 +812,13 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/complete/${entryId}`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
   async function addWalkInCustomer() {
     if (!walkInName.trim()) {
-      Alert.alert('Enter name', 'Walk-in customer name is required.');
+      appAlert('Enter name', 'Walk-in customer name is required.');
       return;
     }
     try {
@@ -829,7 +830,7 @@ export default function OwnerDashboard({ navigation }) {
       setWalkInName('');
       setShowWalkInInput(false);
     } catch (e) {
-      Alert.alert('Could not add customer', e.response?.data?.message || e.message);
+      appAlert('Could not add customer', e.response?.data?.message || e.message);
     } finally {
       setAddingWalkIn(false);
     }
@@ -838,7 +839,7 @@ export default function OwnerDashboard({ navigation }) {
   async function addItem() {
     const price = parseFloat(itemPrice);
     if (!itemName.trim() || Number.isNaN(price)) {
-      Alert.alert('Check item', 'Enter name and valid price.');
+      appAlert('Check item', 'Enter name and valid price.');
       return;
     }
     try {
@@ -848,7 +849,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.get(`/shops/${shopId}/items`);
       setItems(data.items || []);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -1141,7 +1142,6 @@ const styles = StyleSheet.create({
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   PermissionsAndroid,
   Platform,
   ScrollView,
@@ -1215,7 +1215,7 @@ export default function OwnerDashboard({ navigation }) {
         setShops(list);
         if (list.length) setShopId(list[0]._id);
       } catch (e) {
-        Alert.alert('Error', e.response?.data?.message || e.message);
+        appAlert('Error', e.response?.data?.message || e.message);
       } finally {
         if (alive) setLoading(false);
       }
@@ -1265,7 +1265,7 @@ export default function OwnerDashboard({ navigation }) {
           if (!cancelled) setQueue(payload);
         });
       } catch (e) {
-        if (!cancelled) Alert.alert('Queue', e.response?.data?.message || e.message);
+        if (!cancelled) appAlert('Queue', e.response?.data?.message || e.message);
       }
     }
     sync();
@@ -1294,7 +1294,7 @@ export default function OwnerDashboard({ navigation }) {
       setRefreshingLocation(true);
       const ok = await ensureLocationPermission();
       if (!ok) {
-        Alert.alert('Permission needed', 'Location permission is required.');
+        appAlert('Permission needed', 'Location permission is required.');
         return;
       }
       await new Promise((resolve) => {
@@ -1304,7 +1304,7 @@ export default function OwnerDashboard({ navigation }) {
             resolve();
           },
           () => {
-            Alert.alert('Location error', 'Could not fetch current location.');
+            appAlert('Location error', 'Could not fetch current location.');
             resolve();
           },
           { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
@@ -1317,7 +1317,7 @@ export default function OwnerDashboard({ navigation }) {
 
   async function createShop() {
     if (!shopNameInput.trim() || !shopAddressInput.trim() || !shopCoords) {
-      Alert.alert('Check form', 'Name, address, and location are required.');
+      appAlert('Check form', 'Name, address, and location are required.');
       return;
     }
     try {
@@ -1333,7 +1333,7 @@ export default function OwnerDashboard({ navigation }) {
       setShopNameInput('');
       setShopAddressInput('');
     } catch (e) {
-      Alert.alert('Create shop failed', e.response?.data?.message || e.message);
+      appAlert('Create shop failed', e.response?.data?.message || e.message);
     } finally {
       setCreatingShop(false);
     }
@@ -1342,7 +1342,7 @@ export default function OwnerDashboard({ navigation }) {
   async function updateShopInfo() {
     if (!shopId) return;
     if (!editName.trim() || !editAddress.trim()) {
-      Alert.alert('Check form', 'Shop name and address are required.');
+      appAlert('Check form', 'Shop name and address are required.');
       return;
     }
     try {
@@ -1358,9 +1358,9 @@ export default function OwnerDashboard({ navigation }) {
       }
       const { data } = await client.patch(`/shops/${shopId}`, payload);
       setShops((prev) => prev.map((s) => (s._id === shopId ? data.shop : s)));
-      Alert.alert('Updated', 'Shop info saved.');
+      appAlert('Updated', 'Shop info saved.');
     } catch (e) {
-      Alert.alert('Update failed', e.response?.data?.message || e.message);
+      appAlert('Update failed', e.response?.data?.message || e.message);
     } finally {
       setUpdatingShop(false);
     }
@@ -1371,7 +1371,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/next`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -1380,13 +1380,13 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/complete/${entryId}`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
   async function addWalkInCustomer() {
     if (!walkInName.trim()) {
-      Alert.alert('Enter name', 'Walk-in customer name is required.');
+      appAlert('Enter name', 'Walk-in customer name is required.');
       return;
     }
     try {
@@ -1398,7 +1398,7 @@ export default function OwnerDashboard({ navigation }) {
       setWalkInName('');
       setShowWalkInInput(false);
     } catch (e) {
-      Alert.alert('Could not add customer', e.response?.data?.message || e.message);
+      appAlert('Could not add customer', e.response?.data?.message || e.message);
     } finally {
       setAddingWalkIn(false);
     }
@@ -1407,7 +1407,7 @@ export default function OwnerDashboard({ navigation }) {
   async function addItem() {
     const price = parseFloat(itemPrice);
     if (!itemName.trim() || Number.isNaN(price)) {
-      Alert.alert('Check item', 'Enter name and valid price.');
+      appAlert('Check item', 'Enter name and valid price.');
       return;
     }
     try {
@@ -1417,7 +1417,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.get(`/shops/${shopId}/items`);
       setItems(data.items || []);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -1616,7 +1616,6 @@ const styles = StyleSheet.create({
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   PermissionsAndroid,
   Platform,
   ScrollView,
@@ -1698,7 +1697,7 @@ export default function OwnerDashboard({ navigation }) {
         setShops(list);
         if (list.length) setShopId(list[0]._id);
       } catch (e) {
-        Alert.alert('Error', e.response?.data?.message || e.message);
+        appAlert('Error', e.response?.data?.message || e.message);
       } finally {
         if (alive) setLoading(false);
       }
@@ -1748,7 +1747,7 @@ export default function OwnerDashboard({ navigation }) {
           if (!cancelled) setQueue(payload);
         });
       } catch (e) {
-        if (!cancelled) Alert.alert('Queue', e.response?.data?.message || e.message);
+        if (!cancelled) appAlert('Queue', e.response?.data?.message || e.message);
       }
     }
     sync();
@@ -1774,7 +1773,7 @@ export default function OwnerDashboard({ navigation }) {
 
   async function createShop() {
     if (!shopNameInput.trim() || !shopAddressInput.trim() || !shopCoords) {
-      Alert.alert('Check form', 'Name, address, and location are required.');
+      appAlert('Check form', 'Name, address, and location are required.');
       return;
     }
     try {
@@ -1791,7 +1790,7 @@ export default function OwnerDashboard({ navigation }) {
       setShopNameInput('');
       setShopAddressInput('');
     } catch (e) {
-      Alert.alert('Create shop failed', e.response?.data?.message || e.message);
+      appAlert('Create shop failed', e.response?.data?.message || e.message);
     } finally {
       setCreatingShop(false);
     }
@@ -1802,7 +1801,7 @@ export default function OwnerDashboard({ navigation }) {
       setRefreshingLocation(true);
       const ok = await ensureLocationPermission();
       if (!ok) {
-        Alert.alert('Permission needed', 'Location permission is required.');
+        appAlert('Permission needed', 'Location permission is required.');
         return;
       }
       await new Promise((resolve) => {
@@ -1812,7 +1811,7 @@ export default function OwnerDashboard({ navigation }) {
             resolve();
           },
           () => {
-            Alert.alert('Location error', 'Could not fetch current location.');
+            appAlert('Location error', 'Could not fetch current location.');
             resolve();
           },
           { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
@@ -1826,7 +1825,7 @@ export default function OwnerDashboard({ navigation }) {
   async function updateShopInfo() {
     if (!shopId) return;
     if (!editName.trim() || !editAddress.trim()) {
-      Alert.alert('Check form', 'Shop name and address are required.');
+      appAlert('Check form', 'Shop name and address are required.');
       return;
     }
     try {
@@ -1843,9 +1842,9 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.patch(`/shops/${shopId}`, payload);
       const updated = data.shop;
       setShops((prev) => prev.map((s) => (s._id === shopId ? updated : s)));
-      Alert.alert('Updated', 'Shop info saved.');
+      appAlert('Updated', 'Shop info saved.');
     } catch (e) {
-      Alert.alert('Update failed', e.response?.data?.message || e.message);
+      appAlert('Update failed', e.response?.data?.message || e.message);
     } finally {
       setUpdatingShop(false);
     }
@@ -1856,7 +1855,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/next`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -1865,13 +1864,13 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/complete/${entryId}`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
   async function addWalkInCustomer() {
     if (!walkInName.trim()) {
-      Alert.alert('Enter name', 'Walk-in customer name is required.');
+      appAlert('Enter name', 'Walk-in customer name is required.');
       return;
     }
     try {
@@ -1883,7 +1882,7 @@ export default function OwnerDashboard({ navigation }) {
       setWalkInName('');
       setShowWalkInInput(false);
     } catch (e) {
-      Alert.alert('Could not add customer', e.response?.data?.message || e.message);
+      appAlert('Could not add customer', e.response?.data?.message || e.message);
     } finally {
       setAddingWalkIn(false);
     }
@@ -1892,7 +1891,7 @@ export default function OwnerDashboard({ navigation }) {
   async function addItem() {
     const price = parseFloat(itemPrice);
     if (!itemName.trim() || Number.isNaN(price)) {
-      Alert.alert('Check item', 'Enter name and valid price.');
+      appAlert('Check item', 'Enter name and valid price.');
       return;
     }
     try {
@@ -1905,7 +1904,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.get(`/shops/${shopId}/items`);
       setItems(data.items || []);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -2211,7 +2210,6 @@ const styles = StyleSheet.create({
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   PermissionsAndroid,
   Platform,
@@ -2288,7 +2286,7 @@ export default function OwnerDashboard({ navigation }) {
           setShopId((prev) => prev || list[0]._id);
         }
       } catch (e) {
-        Alert.alert('Error', e.response?.data?.message || e.message);
+        appAlert('Error', e.response?.data?.message || e.message);
       } finally {
         if (alive) setLoading(false);
       }
@@ -2345,7 +2343,7 @@ export default function OwnerDashboard({ navigation }) {
         });
       } catch (e) {
         if (!cancelled) {
-          Alert.alert('Queue', e.response?.data?.message || e.message);
+          appAlert('Queue', e.response?.data?.message || e.message);
         }
       }
     }
@@ -2377,7 +2375,7 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.post(`/queues/${shopId}/owner/next`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -2388,14 +2386,14 @@ export default function OwnerDashboard({ navigation }) {
       );
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
   async function addItem() {
     const price = parseFloat(itemPrice);
     if (!itemName.trim() || Number.isNaN(price)) {
-      Alert.alert('Check item', 'Enter name and valid price.');
+      appAlert('Check item', 'Enter name and valid price.');
       return;
     }
     try {
@@ -2408,21 +2406,21 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.get(`/shops/${shopId}/items`);
       setItems(data.items || []);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
   async function createShop() {
     if (!shopNameInput.trim()) {
-      Alert.alert('Check form', 'Shop name is required.');
+      appAlert('Check form', 'Shop name is required.');
       return;
     }
     if (!shopAddressInput.trim()) {
-      Alert.alert('Check form', 'Shop address is required.');
+      appAlert('Check form', 'Shop address is required.');
       return;
     }
     if (!shopCoords) {
-      Alert.alert(
+      appAlert(
         'Location missing',
         'Could not fetch location. Turn on location and try again.'
       );
@@ -2442,7 +2440,7 @@ export default function OwnerDashboard({ navigation }) {
       setShopNameInput('');
       setShopAddressInput('');
     } catch (e) {
-      Alert.alert('Create shop failed', e.response?.data?.message || e.message);
+      appAlert('Create shop failed', e.response?.data?.message || e.message);
     } finally {
       setCreatingShop(false);
     }
@@ -2453,7 +2451,7 @@ export default function OwnerDashboard({ navigation }) {
       setRefreshingLocation(true);
       const ok = await ensureLocationPermission();
       if (!ok) {
-        Alert.alert('Permission needed', 'Location permission is required.');
+        appAlert('Permission needed', 'Location permission is required.');
         return;
       }
       await new Promise((resolve) => {
@@ -2466,7 +2464,7 @@ export default function OwnerDashboard({ navigation }) {
             resolve();
           },
           () => {
-            Alert.alert('Location error', 'Could not fetch current location.');
+            appAlert('Location error', 'Could not fetch current location.');
             resolve();
           },
           { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
@@ -2482,7 +2480,7 @@ export default function OwnerDashboard({ navigation }) {
       setRefreshingLocation(true);
       const ok = await ensureLocationPermission();
       if (!ok) {
-        Alert.alert('Permission needed', 'Location permission is required.');
+        appAlert('Permission needed', 'Location permission is required.');
         return;
       }
       await new Promise((resolve) => {
@@ -2495,7 +2493,7 @@ export default function OwnerDashboard({ navigation }) {
             resolve();
           },
           () => {
-            Alert.alert('Location error', 'Could not fetch current location.');
+            appAlert('Location error', 'Could not fetch current location.');
             resolve();
           },
           { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
@@ -2509,11 +2507,11 @@ export default function OwnerDashboard({ navigation }) {
   async function updateShopInfo() {
     if (!shopId) return;
     if (!editName.trim()) {
-      Alert.alert('Check form', 'Shop name is required.');
+      appAlert('Check form', 'Shop name is required.');
       return;
     }
     if (!editAddress.trim()) {
-      Alert.alert('Check form', 'Shop address is required.');
+      appAlert('Check form', 'Shop address is required.');
       return;
     }
     try {
@@ -2530,9 +2528,9 @@ export default function OwnerDashboard({ navigation }) {
       const { data } = await client.patch(`/shops/${shopId}`, payload);
       const updated = data.shop;
       setShops((prev) => prev.map((s) => (s._id === shopId ? updated : s)));
-      Alert.alert('Updated', 'Shop info saved successfully.');
+      appAlert('Updated', 'Shop info saved successfully.');
     } catch (e) {
-      Alert.alert('Update failed', e.response?.data?.message || e.message);
+      appAlert('Update failed', e.response?.data?.message || e.message);
     } finally {
       setUpdatingShop(false);
     }

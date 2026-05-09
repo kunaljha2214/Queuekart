@@ -7,7 +7,6 @@ import {
   View,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +16,7 @@ import { orderlyFlow } from '../theme/orderlyFlow';
 import QueueKartLogoMark from '../components/QueueKartLogoMark';
 import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
 import Feather from 'react-native-vector-icons/Feather';
+import { appAlert } from '../utils/appAlert';
 
 const { colors, radius, spacing, type } = orderlyFlow;
 
@@ -92,7 +92,7 @@ export default function RegisterScreen({ navigation }) {
     const normalizedPhone = phone.trim();
 
     if (!name.trim() || !normalizedEmail || !normalizedPhone || normalizedPassword.length < 6) {
-      Alert.alert(
+      appAlert(
         'Check form',
         'Name, phone, and email are required; password must be at least 6 characters.'
       );
@@ -109,14 +109,14 @@ export default function RegisterScreen({ navigation }) {
       });
       setOtpSent(true);
       setResendSeconds(30);
-      Alert.alert('OTP sent', data.message || 'Please check your email for OTP.');
+      appAlert('OTP sent', data.message || 'Please check your email for OTP.');
     } catch (e) {
       const msg =
         e.response?.data?.message ||
         e.response?.data?.errors?.[0]?.msg ||
         e.message ||
         'Registration failed.';
-      Alert.alert('Could not register', msg);
+      appAlert('Could not register', msg);
     } finally {
       setLoading(false);
     }
@@ -126,7 +126,7 @@ export default function RegisterScreen({ navigation }) {
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedOtp = otp.trim();
     if (!normalizedEmail || !normalizedOtp) {
-      Alert.alert('Missing fields', 'Enter email and OTP.');
+      appAlert('Missing fields', 'Enter email and OTP.');
       return;
     }
     setLoading(true);
@@ -138,7 +138,7 @@ export default function RegisterScreen({ navigation }) {
         e.response?.data?.errors?.[0]?.msg ||
         e.message ||
         'OTP verification failed.';
-      Alert.alert('Could not verify OTP', msg);
+      appAlert('Could not verify OTP', msg);
     } finally {
       setLoading(false);
     }

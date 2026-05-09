@@ -2,7 +2,6 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Modal,
   PermissionsAndroid,
@@ -28,6 +27,7 @@ import {
   PLACEMENT_OWNER_WALK_IN_INTERSTITIAL,
 } from '../constants/adPlacements';
 import { requestInterstitialShow } from '../utils/showInterstitialAd';
+import { appAlert } from '../utils/appAlert';
 
 export default function OwnerDashboardV2({ navigation }) {
   const { logout } = useAuth();
@@ -164,7 +164,7 @@ export default function OwnerDashboardV2({ navigation }) {
       const { data } = await client.get('/shops');
       setShops(data.shops || []);
     } catch (e) {
-      Alert.alert('Shop status', e.response?.data?.message || e.message || 'Could not update shop status.');
+      appAlert('Shop status', e.response?.data?.message || e.message || 'Could not update shop status.');
     } finally {
       setTogglingShopOpen(false);
     }
@@ -175,13 +175,13 @@ export default function OwnerDashboardV2({ navigation }) {
       const raw = String(phone || '').trim();
       const cleaned = raw.replace(/[^\d+]/g, '');
       if (!cleaned) {
-        Alert.alert('No phone number', 'This customer does not have a phone number.');
+        appAlert('No phone number', 'This customer does not have a phone number.');
         return;
       }
       const url = `tel:${cleaned}`;
       await Linking.openURL(url);
     } catch (e) {
-      Alert.alert(
+      appAlert(
         'Call not available',
         'Could not open the phone dialer on this device. If you are testing on an emulator, calls are not supported.'
       );
@@ -214,7 +214,7 @@ export default function OwnerDashboardV2({ navigation }) {
       });
       const { data: shopsRes } = await client.get('/shops');
       setShops(shopsRes.shops || []);
-      Alert.alert(
+      appAlert(
         'Subscription active',
         'Payment successful. Your shop can appear to customers when Shop status is Open.'
       );
@@ -225,7 +225,7 @@ export default function OwnerDashboardV2({ navigation }) {
         e?.description ||
         e?.message ||
         'Payment failed.';
-      Alert.alert('Payment', msg);
+      appAlert('Payment', msg);
     } finally {
       setPayingSub(false);
     }
@@ -302,7 +302,7 @@ export default function OwnerDashboardV2({ navigation }) {
           setShowAddShop(true);
         }
       } catch (e) {
-        if (alive) Alert.alert('Error', e.response?.data?.message || e.message);
+        if (alive) appAlert('Error', e.response?.data?.message || e.message);
       } finally {
         if (alive) setLoading(false);
       }
@@ -331,7 +331,7 @@ export default function OwnerDashboardV2({ navigation }) {
           if (!cancelled) setQueue(payload);
         });
       } catch (e) {
-        if (!cancelled) Alert.alert('Queue', e.response?.data?.message || e.message);
+        if (!cancelled) appAlert('Queue', e.response?.data?.message || e.message);
       }
     })();
     return () => {
@@ -367,7 +367,7 @@ export default function OwnerDashboardV2({ navigation }) {
         }
       } catch (e) {
         if (!cancelled) {
-          Alert.alert('History', e.response?.data?.message || e.message);
+          appAlert('History', e.response?.data?.message || e.message);
         }
       } finally {
         if (!cancelled) setHistoryLoading(false);
@@ -483,23 +483,23 @@ export default function OwnerDashboardV2({ navigation }) {
       setQueue(data);
       requestInterstitialShow(getInterstitialUnitId(PLACEMENT_OWNER_REMOVE_ENTRY_INTERSTITIAL));
     } catch (e) {
-      Alert.alert('Remove', e.response?.data?.message || e.message || 'Could not remove entry.');
+      appAlert('Remove', e.response?.data?.message || e.message || 'Could not remove entry.');
     }
   }
 
   async function addWalkInCustomer() {
     const count = Number(walkInCount);
     if (!Number.isFinite(count) || count < 1) {
-      Alert.alert('Invalid count', 'Queue increase must be at least 1.');
+      appAlert('Invalid count', 'Queue increase must be at least 1.');
       return;
     }
     if (walkInEstimate.trim() === '') {
-      Alert.alert('Required', 'Estimated time is required.');
+      appAlert('Required', 'Estimated time is required.');
       return;
     }
     const parsedEstimate = Number(walkInEstimate.trim());
     if (!Number.isFinite(parsedEstimate) || parsedEstimate < 0) {
-      Alert.alert('Invalid estimate', 'Estimated time must be a non-negative number.');
+      appAlert('Invalid estimate', 'Estimated time must be a non-negative number.');
       return;
     }
     try {
@@ -520,7 +520,7 @@ export default function OwnerDashboardV2({ navigation }) {
       setShowWalkInInput(false);
       requestInterstitialShow(getInterstitialUnitId(PLACEMENT_OWNER_WALK_IN_INTERSTITIAL));
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     } finally {
       setAddingWalkIn(false);
     }
@@ -532,7 +532,7 @@ export default function OwnerDashboardV2({ navigation }) {
       address: editAddress.trim(),
       description: editDescription.trim(),
     });
-    Alert.alert('Saved', 'Shop details updated.');
+    appAlert('Saved', 'Shop details updated.');
   }
 
   async function createShop() {
@@ -542,11 +542,11 @@ export default function OwnerDashboardV2({ navigation }) {
     const lat = Number(newShopLat.trim());
     const lng = Number(newShopLng.trim());
     if (!name) {
-      Alert.alert('Required', 'Shop name is required.');
+      appAlert('Required', 'Shop name is required.');
       return;
     }
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      Alert.alert('Required', 'Location is required. Please allow location access.');
+      appAlert('Required', 'Location is required. Please allow location access.');
       return;
     }
     try {
@@ -573,7 +573,7 @@ export default function OwnerDashboardV2({ navigation }) {
         e.response?.data?.message ||
         e.response?.data?.errors?.[0]?.msg ||
         e.message;
-      Alert.alert('Could not create shop', msg);
+      appAlert('Could not create shop', msg);
     } finally {
       setCreatingShop(false);
     }
@@ -588,7 +588,7 @@ export default function OwnerDashboardV2({ navigation }) {
         contentContainerStyle={styles.content}
       >
         <View style={styles.topTitleRow}>
-          <Text style={[styles.title, { color: colors.text }]}>Your Shop</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Shop Details</Text>
           <ThemeToggleSwitch isDark={isDark} onToggle={toggleTheme} />
         </View>
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -695,7 +695,7 @@ export default function OwnerDashboardV2({ navigation }) {
   return (
     <ScrollView style={[styles.page, { backgroundColor: colors.bg }]} contentContainerStyle={styles.content}>
       <View style={styles.topTitleRow}>
-        <Text style={[styles.title, { color: colors.text }]}>Your Shop</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Shop Details</Text>
         <ThemeToggleSwitch isDark={isDark} onToggle={toggleTheme} />
       </View>
       <View style={[styles.headerCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -888,6 +888,12 @@ export default function OwnerDashboardV2({ navigation }) {
         const status = String(entry.status || '').toLowerCase().trim();
         const canRemove = status === 'waiting' || status === 'serving';
         const groceryList = String(entry.groceryList || '').trim();
+        const pickupExtra =
+          entry.joinKind === 'priority_second'
+            ? ' · Priority (₹25)'
+            : entry.pickupAt && !Number.isNaN(new Date(entry.pickupAt).getTime())
+              ? ` · Pickup ${new Date(entry.pickupAt).toLocaleString()}`
+              : '';
         return (
           <View
             key={String(entry.id || entry.position)}
@@ -905,10 +911,10 @@ export default function OwnerDashboardV2({ navigation }) {
                     activeOpacity={0.85}
                     onPress={() => {
                       if (!groceryList) {
-                        Alert.alert('Grocery list', 'No grocery list added for this customer.');
+                        appAlert('Grocery list', 'No grocery list added for this customer.');
                         return;
                       }
-                      Alert.alert('Grocery list', groceryList);
+                      appAlert('Grocery list', groceryList);
                     }}
                   >
                     <Text style={[styles.rowTitle, { color: colors.text }]}>
@@ -918,6 +924,7 @@ export default function OwnerDashboardV2({ navigation }) {
                       {status || '-'}
                       {Number(entry.estimatedMinutes) > 0 ? ` • Est ${entry.estimatedMinutes} min` : ''}
                       {groceryList ? ' • Has grocery list' : ''}
+                      {pickupExtra}
                     </Text>
                   </TouchableOpacity>
 
@@ -939,7 +946,7 @@ export default function OwnerDashboardV2({ navigation }) {
                     style={[styles.removeBtn, { flex: 1 }]}
                     onPress={() => {
                       if (!canRemove) return;
-                      Alert.alert('Remove customer?', 'This will remove the customer from the queue.', [
+                      appAlert('Remove customer?', 'This will remove the customer from the queue.', [
                         { text: 'Cancel', style: 'cancel' },
                         { text: 'Remove', style: 'destructive', onPress: () => removeEntry(entry.id) },
                       ]);
@@ -958,10 +965,10 @@ export default function OwnerDashboardV2({ navigation }) {
                 activeOpacity={0.85}
                 onPress={() => {
                   if (!groceryList) {
-                    Alert.alert('Grocery list', 'No grocery list added for this customer.');
+                    appAlert('Grocery list', 'No grocery list added for this customer.');
                     return;
                   }
-                  Alert.alert('Grocery list', groceryList);
+                  appAlert('Grocery list', groceryList);
                 }}
               >
                 <Text style={[styles.rowTitle, { color: colors.text }]}>
@@ -970,6 +977,8 @@ export default function OwnerDashboardV2({ navigation }) {
                 <Text style={[styles.rowMeta, { color: colors.textSubtle }]}>
                   {status || '-'}
                   {Number(entry.estimatedMinutes) > 0 ? ` • Est ${entry.estimatedMinutes} min` : ''}
+                  {groceryList ? ' • Has grocery list' : ''}
+                  {pickupExtra}
                 </Text>
               </TouchableOpacity>
             )}
@@ -979,7 +988,7 @@ export default function OwnerDashboardV2({ navigation }) {
                 style={[styles.removeBtn, { backgroundColor: colors.danger }]}
                 onPress={() => {
                   if (!canRemove) return;
-                  Alert.alert('Remove customer?', 'This will remove the customer from the queue.', [
+                  appAlert('Remove customer?', 'This will remove the customer from the queue.', [
                     { text: 'Cancel', style: 'cancel' },
                     { text: 'Remove', style: 'destructive', onPress: () => removeEntry(entry.id) },
                   ]);

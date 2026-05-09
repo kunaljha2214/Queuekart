@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Linking,
   PermissionsAndroid,
@@ -20,6 +19,7 @@ import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
 import AdMobBanner from '../components/AdMobBanner';
 import { PLACEMENT_NEARBY_SHOPS_HEADER } from '../constants/adPlacements';
 import Feather from 'react-native-vector-icons/Feather';
+import { appAlert } from '../utils/appAlert';
 
 async function ensureLocationPermission() {
   if (Platform.OS !== 'android') {
@@ -93,7 +93,7 @@ export default function NearbyShopsScreen({ navigation }) {
     setLastError('');
     const ok = await ensureLocationPermission();
     if (!ok) {
-      Alert.alert('Location needed', 'Allow location to find shops near you.');
+      appAlert('Location needed', 'Allow location to find shops near you.');
       setLastError('Location permission denied.');
       setLoading(false);
       setRefreshing(false);
@@ -108,14 +108,14 @@ export default function NearbyShopsScreen({ navigation }) {
         } catch (e) {
           const msg = e?.message || 'Could not load nearby shops.';
           setLastError(msg);
-          Alert.alert('Error', msg);
+          appAlert('Error', msg);
         } finally {
           setLoading(false);
           setRefreshing(false);
         }
       },
       (err) => {
-        Alert.alert('Location error', err.message);
+        appAlert('Location error', err.message);
         setLastError(err?.message || 'Location error.');
         setLoading(false);
         setRefreshing(false);
@@ -133,7 +133,7 @@ export default function NearbyShopsScreen({ navigation }) {
         if (!mounted) return;
         const msg = e?.message || 'Could not load';
         setLastError(msg);
-        Alert.alert('Error', msg);
+        appAlert('Error', msg);
         setLoading(false);
         setRefreshing(false);
       }
@@ -245,9 +245,9 @@ export default function NearbyShopsScreen({ navigation }) {
       <View style={styles.headerWrap}>
         <View style={styles.titleRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.screenTitle, { color: colors.text }]}>Nearby Shops</Text>
+            <Text style={[styles.screenTitle, { color: colors.text }]}>Find Nearby Shops</Text>
             <Text style={[styles.screenSubTitle, { color: colors.subtle }]}>
-              Find queues near you
+              Wait less, Live more.
             </Text>
           </View>
           <ThemeToggleSwitch isDark={isDark} onToggle={toggleTheme} />
@@ -329,13 +329,13 @@ export default function NearbyShopsScreen({ navigation }) {
       try {
         const coordsArr = shop?.location?.coordinates;
         if (!Array.isArray(coordsArr) || coordsArr.length < 2) {
-          Alert.alert('No location', 'This shop does not have a location set yet.');
+          appAlert('No location', 'This shop does not have a location set yet.');
           return;
         }
         const lat = coordsArr[1];
         const lng = coordsArr[0];
         if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-          Alert.alert('No location', 'This shop does not have a valid location.');
+          appAlert('No location', 'This shop does not have a valid location.');
           return;
         }
 
@@ -369,7 +369,7 @@ export default function NearbyShopsScreen({ navigation }) {
         const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
         await Linking.openURL(webUrl);
       } catch (e) {
-        Alert.alert('Error', e?.message || 'Could not open directions.');
+        appAlert('Error', e?.message || 'Could not open directions.');
       }
     },
     []

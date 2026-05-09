@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Modal,
   Platform,
@@ -25,7 +25,11 @@ import {
   PLACEMENT_QUEUE_SHOP_FOOTER,
 } from '../constants/adPlacements';
 import { requestInterstitialShow } from '../utils/showInterstitialAd';
+import { appAlert } from '../utils/appAlert';
 import Feather from 'react-native-vector-icons/Feather';
+
+/** Must match server QUEUE_PRIORITY_WAITING_THRESHOLD (paid skip only when waiting count is greater than this). */
+const QUEUE_PAY_PRIORITY_THRESHOLD = 5;
 
 export default function QueueScreen({ route, navigation }) {
   const { shopId, shopName, promptGroceryList } = route.params || {};
@@ -47,19 +51,56 @@ export default function QueueScreen({ route, navigation }) {
   const [groceryMode, setGroceryMode] = useState('join'); // 'join' | 'edit'
   const [selectedQueue, setSelectedQueue] = useState(null); // { shopId, entryId, groceryList, shopName, shopAddress, position }
   const didAutoPromptRef = useRef(false);
+  const [showJoinOptionsModal, setShowJoinOptionsModal] = useState(false);
+  const [pendingJoinGroceryList, setPendingJoinGroceryList] = useState('');
+  const [pickupChoice, setPickupChoice] = useState('flexible'); // 'flexible' | 'scheduled'
+  const [pickupAtDate, setPickupAtDate] = useState(() => {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() + 45, 0, 0);
+    return d;
+  });
+  const openPickupPicker = useCallback(() => {
+    if (Platform.OS !== 'android') return;
+
+    const base = new Date(pickupAtDate);
+    const now = new Date();
+
+    DateTimePickerAndroid.open({
+      value: base,
+      mode: 'date',
+      minimumDate: now,
+      onChange: (_event, selectedDate) => {
+        if (!selectedDate) return;
+        const withDate = new Date(base);
+        withDate.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+
+        DateTimePickerAndroid.open({
+          value: withDate,
+          mode: 'time',
+          is24Hour: false,
+          onChange: (__event, selectedTime) => {
+            if (!selectedTime) return;
+            const next = new Date(withDate);
+            next.setHours(selectedTime.getHours(), selectedTime.getMinutes(), 0, 0);
+            setPickupAtDate(next);
+          },
+        });
+      },
+    });
+  }, [pickupAtDate]);
 
   const openCall = useCallback(async (phone) => {
     try {
       const raw = String(phone || '').trim();
       const cleaned = raw.replace(/[^\d+]/g, '');
       if (!cleaned) {
-        Alert.alert('No phone number', 'This shop does not have a phone number.');
+        appAlert('No phone number', 'This shop does not have a phone number.');
         return;
       }
       const url = `tel:${cleaned}`;
       await Linking.openURL(url);
     } catch (e) {
-      Alert.alert(
+      appAlert(
         'Call not available',
         'Could not open the phone dialer on this device. If you are testing on an emulator, calls are not supported.'
       );
@@ -69,13 +110,13 @@ export default function QueueScreen({ route, navigation }) {
   const openDirections = useCallback(async (coordsArr, label) => {
     try {
       if (!Array.isArray(coordsArr) || coordsArr.length < 2) {
-        Alert.alert('No location', 'This shop does not have a location set yet.');
+        appAlert('No location', 'This shop does not have a location set yet.');
         return;
       }
       const lng = coordsArr[0];
       const lat = coordsArr[1];
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-        Alert.alert('No location', 'This shop does not have a valid location.');
+        appAlert('No location', 'This shop does not have a valid location.');
         return;
       }
       const safeLabel = encodeURIComponent(String(label || 'Shop'));
@@ -98,7 +139,7 @@ export default function QueueScreen({ route, navigation }) {
       const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
       await Linking.openURL(webUrl);
     } catch (e) {
-      Alert.alert('Error', e?.message || 'Could not open directions.');
+      appAlert('Error', e?.message || 'Could not open directions.');
     }
   }, []);
 
@@ -168,7 +209,7 @@ export default function QueueScreen({ route, navigation }) {
           await loadMyQueues();
           await loadMyQueueHistory();
         } catch (e) {
-          if (!cancelled) Alert.alert('Error', e.response?.data?.message || e.message);
+          if (!cancelled) appAlert('Error', e.response?.data?.message || e.message);
         } finally {
           if (!cancelled) setLoading(false);
         }
@@ -194,7 +235,7 @@ export default function QueueScreen({ route, navigation }) {
         cleanup = unsub;
       } catch (e) {
         if (!cancelled) {
-          Alert.alert('Error', e.response?.data?.message || e.message);
+          appAlert('Error', e.response?.data?.message || e.message);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -244,6 +285,14 @@ export default function QueueScreen({ route, navigation }) {
     );
   }, [queue?.entries, user?.id]);
 
+  const myPickupLabel = useMemo(() => {
+    const raw = myEntry?.pickupAt;
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return '';
+    return `Pickup: ${d.toLocaleString()}`;
+  }, [myEntry?.pickupAt]);
+
   const groceryItems = useMemo(() => {
     const text = String(myEntry?.groceryList || '').trim();
     if (!text) return [];
@@ -254,6 +303,9 @@ export default function QueueScreen({ route, navigation }) {
       .slice(0, 80);
   }, [myEntry?.groceryList]);
 
+  const waitingAheadCount = queue?.totalWaiting ?? 0;
+  const showPaidPriorityOption = waitingAheadCount > QUEUE_PAY_PRIORITY_THRESHOLD;
+
   function beginJoin() {
     setGroceryMode('join');
     setGroceryListText('');
@@ -262,7 +314,7 @@ export default function QueueScreen({ route, navigation }) {
 
   function beginEditGroceryList() {
     if (String(myStatus?.status || '').toLowerCase() !== 'waiting') {
-      Alert.alert(
+      appAlert(
         'Cannot edit now',
         'Your items are packing, so editing the grocery list is not possible.'
       );
@@ -273,8 +325,145 @@ export default function QueueScreen({ route, navigation }) {
     setShowGroceryModal(true);
   }
 
+  function proceedToJoinOptions() {
+    const list = String(groceryListText || '').trim();
+    if (!list) {
+      appAlert('Grocery list required', 'Please enter at least one item before joining the queue.');
+      return;
+    }
+    setPendingJoinGroceryList(list);
+    setPickupChoice('flexible');
+    setShowGroceryModal(false);
+    setShowJoinOptionsModal(true);
+  }
+
+  function pickupPayloadFields() {
+    if (pickupChoice !== 'scheduled') return {};
+    return { pickupAt: pickupAtDate.toISOString() };
+  }
+
+  function applyJoinSuccess(data) {
+    setQueue({
+      shop: data.shop,
+      entries: data.entries,
+      totalWaiting: data.totalWaiting,
+    });
+    setMyStatus({
+      inQueue: true,
+      yourEntryId: data.yourEntryId,
+      yourPosition: data.yourPosition,
+      status: 'waiting',
+      totalAhead: Math.max(0, data.yourPosition - 1),
+    });
+    setShowJoinOptionsModal(false);
+    setShowGroceryModal(false);
+    setPendingJoinGroceryList('');
+    setSelectedQueue(null);
+    setGroceryListText('');
+    if (promptGroceryList) {
+      navigation.setParams({ promptGroceryList: false });
+    }
+    requestInterstitialShow(getInterstitialUnitId(PLACEMENT_CUSTOMER_JOIN_QUEUE_INTERSTITIAL));
+  }
+
+  async function postJoin(joinBody) {
+    const effectiveShopId = shopId != null ? shopId : selectedQueue?.shopId;
+    const { data } = await client.post(`/queues/${effectiveShopId}/join`, joinBody);
+    return data;
+  }
+
+  async function confirmStandardJoin() {
+    const list = String(pendingJoinGroceryList || '').trim();
+    if (!list) {
+      appAlert('Grocery list required', 'Your grocery list is empty.');
+      return;
+    }
+    if (pickupChoice === 'scheduled') {
+      if (pickupAtDate.getTime() < Date.now() - 60_000) {
+        appAlert('Pickup time', 'Choose a pickup time in the future.');
+        return;
+      }
+    }
+    if (joining) return;
+    setJoining(true);
+    try {
+      const data = await postJoin({
+        groceryList: list,
+        joinKind: 'standard',
+        ...pickupPayloadFields(),
+      });
+      applyJoinSuccess(data);
+    } catch (e) {
+      appAlert('Could not join', e.response?.data?.message || e.message);
+    } finally {
+      setJoining(false);
+    }
+  }
+
+  async function confirmPaidPriorityJoin() {
+    const list = String(pendingJoinGroceryList || '').trim();
+    if (!list) {
+      appAlert('Grocery list required', 'Your grocery list is empty.');
+      return;
+    }
+    if (!showPaidPriorityOption) {
+      appAlert(
+        'Unavailable',
+        `Priority join is only available when more than ${QUEUE_PAY_PRIORITY_THRESHOLD} customers are waiting.`
+      );
+      return;
+    }
+    if (pickupChoice === 'scheduled' && pickupAtDate.getTime() < Date.now() - 60_000) {
+      appAlert('Pickup time', 'Choose a pickup time in the future.');
+      return;
+    }
+    const effectiveShopId = shopId != null ? shopId : selectedQueue?.shopId;
+    if (!effectiveShopId) {
+      appAlert('Error', 'Missing shop.');
+      return;
+    }
+    if (joining) return;
+    setJoining(true);
+    try {
+      const { data: ord } = await client.post('/payments/razorpay/queue-priority-order', {
+        shopId: effectiveShopId,
+      });
+      const { default: RazorpayCheckout } = await import('react-native-razorpay');
+      const options = {
+        key: ord.keyId,
+        amount: ord.amount,
+        currency: ord.currency || 'INR',
+        name: 'QueueKart',
+        description: 'Skip to 2nd in queue · ₹25',
+        order_id: ord.orderId,
+        theme: { color: Platform.OS === 'ios' ? '#2563eb' : '#2563eb' },
+      };
+      const result = await RazorpayCheckout.open(options);
+      const data = await postJoin({
+        groceryList: list,
+        joinKind: 'priority_second',
+        razorpay_order_id: result.razorpay_order_id,
+        razorpay_payment_id: result.razorpay_payment_id,
+        razorpay_signature: result.razorpay_signature,
+        ...pickupPayloadFields(),
+      });
+      applyJoinSuccess(data);
+    } catch (e) {
+      const msg =
+        e?.response?.data?.message ||
+        e?.details?.description ||
+        e?.description ||
+        e?.message ||
+        'Payment failed or was cancelled.';
+      appAlert('Could not join with priority', msg);
+    } finally {
+      setJoining(false);
+    }
+  }
+
   async function submitGroceryList() {
     if (joining) return;
+
     try {
       const payload = {};
       const list = String(groceryListText || '').trim();
@@ -285,21 +474,13 @@ export default function QueueScreen({ route, navigation }) {
           : String(selectedQueue?.groceryList || '').trim();
       const isChanged = list !== prev;
 
-      // Validation: grocery list is required while joining.
-      if (groceryMode === 'join' && !list) {
-        Alert.alert('Grocery list required', 'Please enter at least one item before joining the queue.');
-        return;
-      }
-
-      // Only send updates if user actually changed the list.
-      if (groceryMode === 'edit' && !isChanged) {
+      if (!isChanged) {
         setShowGroceryModal(false);
         return;
       }
 
-      // For now, prevent saving empty list on edit as well.
-      if (groceryMode === 'edit' && !list) {
-        Alert.alert('Grocery list required', 'Grocery list cannot be empty.');
+      if (!list) {
+        appAlert('Grocery list required', 'Grocery list cannot be empty.');
         return;
       }
 
@@ -308,44 +489,25 @@ export default function QueueScreen({ route, navigation }) {
       setJoining(true);
       const effectiveShopId = shopId != null ? shopId : selectedQueue?.shopId;
       const { data } = await client.post(`/queues/${effectiveShopId}/join`, payload);
-      if (groceryMode === 'join') {
-        setQueue({
-          shop: data.shop,
-          entries: data.entries,
-          totalWaiting: data.totalWaiting,
-        });
-        setMyStatus({
-          inQueue: true,
-          yourEntryId: data.yourEntryId,
-          yourPosition: data.yourPosition,
-          status: 'waiting',
-          totalAhead: Math.max(0, data.yourPosition - 1),
+      if (shopId != null) {
+        setQueue((prevQueue) => {
+          if (!prevQueue?.entries) return prevQueue;
+          const nextEntries = prevQueue.entries.map((e) => {
+            if (String(e.id) !== String(data?.yourEntryId || myStatus?.yourEntryId)) return e;
+            return { ...e, groceryList: list };
+          });
+          return { ...prevQueue, entries: nextEntries };
         });
       } else {
-        if (shopId != null) {
-          // Optimistic update: merge list locally (socket update also arrives from server).
-          setQueue((prevQueue) => {
-            if (!prevQueue?.entries) return prevQueue;
-            const nextEntries = prevQueue.entries.map((e) => {
-              if (String(e.id) !== String(data?.yourEntryId || myStatus?.yourEntryId)) return e;
-              return { ...e, groceryList: list };
-            });
-            return { ...prevQueue, entries: nextEntries };
-          });
-        } else {
-          await loadMyQueues();
-        }
+        await loadMyQueues();
       }
       setShowGroceryModal(false);
       setSelectedQueue(null);
       if (promptGroceryList) {
         navigation.setParams({ promptGroceryList: false });
       }
-      if (groceryMode === 'join') {
-        requestInterstitialShow(getInterstitialUnitId(PLACEMENT_CUSTOMER_JOIN_QUEUE_INTERSTITIAL));
-      }
     } catch (e) {
-      Alert.alert(groceryMode === 'edit' ? 'Could not save' : 'Could not join', e.response?.data?.message || e.message);
+      appAlert('Could not save', e.response?.data?.message || e.message);
     } finally {
       setJoining(false);
     }
@@ -361,7 +523,7 @@ export default function QueueScreen({ route, navigation }) {
       const { data } = await client.get(`/queues/${shopId}`);
       setQueue(data);
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
@@ -371,13 +533,13 @@ export default function QueueScreen({ route, navigation }) {
       await client.delete(`/queues/${q.shopId}/leave/${q.entryId}`);
       await loadMyQueues();
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.message || e.message);
+      appAlert('Error', e.response?.data?.message || e.message);
     }
   }
 
   function beginEditGroceryListFromList(q) {
     if (String(q?.status || '').toLowerCase() !== 'waiting') {
-      Alert.alert(
+      appAlert(
         'Cannot edit now',
         'Your items are packing, so editing the grocery list is not possible.'
       );
@@ -435,7 +597,7 @@ export default function QueueScreen({ route, navigation }) {
             </TouchableOpacity>
             <View style={{ width: 12 }} />
             <TouchableOpacity
-              onPress={submitGroceryList}
+              onPress={groceryMode === 'join' ? proceedToJoinOptions : submitGroceryList}
               activeOpacity={0.9}
               style={[
                 styles.modalPrimaryBtn,
@@ -444,13 +606,7 @@ export default function QueueScreen({ route, navigation }) {
               disabled={joining || !String(groceryListText || '').trim()}
             >
               <Text style={styles.modalPrimaryText}>
-                {joining
-                  ? groceryMode === 'edit'
-                    ? 'Saving…'
-                    : 'Joining…'
-                  : groceryMode === 'edit'
-                    ? 'Save'
-                    : 'Join queue'}
+                {joining ? (groceryMode === 'edit' ? 'Saving…' : 'Joining…') : groceryMode === 'edit' ? 'Save' : 'Next'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -458,6 +614,169 @@ export default function QueueScreen({ route, navigation }) {
       </View>
     </Modal>
   );
+
+  const joinOptionsModal = shopId ? (
+    <Modal
+      visible={showJoinOptionsModal}
+      transparent
+      animationType="fade"
+      onRequestClose={() => {
+        if (!joining) {
+          setShowJoinOptionsModal(false);
+        }
+      }}
+    >
+      <View style={styles.modalBackdrop}>
+        <View
+          style={[styles.modalCard, styles.joinOptionsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+        >
+          <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>How do you want to join?</Text>
+            <Text style={[styles.modalSub, { color: colors.subtle }]}>
+              {waitingAheadCount} {waitingAheadCount === 1 ? 'customer' : 'customers'} waiting right now (not including serving).
+            </Text>
+
+            {showPaidPriorityOption ? (
+              <>
+                <TouchableOpacity
+                  onPress={confirmPaidPriorityJoin}
+                  disabled={joining}
+                  activeOpacity={0.88}
+                  style={[
+                    styles.priorityPayRow,
+                    { borderColor: colors.primary, backgroundColor: colors.bg },
+                  ]}
+                >
+                  <View style={[styles.priorityIconCircle, { backgroundColor: `${colors.primary}22` }]}>
+                    <Feather name="zap" size={22} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.priorityPayTitle, { color: colors.text }]}>Pay ₹25 · 2nd in line</Text>
+                    <Text style={[styles.priorityPaySub, { color: colors.subtle }]}>
+                      Skip ahead when the queue is long. Secured payment with Razorpay.
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                <Text style={[styles.orDivider, { color: colors.subtle }]}>Choose pickup preference below</Text>
+              </>
+            ) : (
+              <Text style={[styles.modalSub, { color: colors.muted, marginTop: 4 }]}>
+                The queue is short — join in order and set when you will pick up groceries.
+              </Text>
+            )}
+
+            <Text style={[styles.joinSectionLabel, { color: colors.text }]}>Pickup</Text>
+            <TouchableOpacity
+              onPress={() => setPickupChoice('flexible')}
+              activeOpacity={0.88}
+              style={[
+                styles.pickOption,
+                {
+                  borderColor: pickupChoice === 'flexible' ? colors.primary : colors.border,
+                  backgroundColor: colors.bg,
+                },
+              ]}
+            >
+              <Feather name="clock" size={18} color={colors.primary} />
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[styles.pickOptionTitle, { color: colors.text }]}>When it's my turn</Text>
+                <Text style={[styles.pickOptionSub, { color: colors.subtle }]}>
+                  Same pace as the queue — no fixed time.
+                </Text>
+              </View>
+              {pickupChoice === 'flexible' ? <Feather name="check-circle" size={20} color={colors.primary} /> : null}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setPickupChoice('scheduled');
+                if (Platform.OS === 'android') openPickupPicker();
+              }}
+              activeOpacity={0.88}
+              style={[
+                styles.pickOption,
+                {
+                  borderColor: pickupChoice === 'scheduled' ? colors.primary : colors.border,
+                  backgroundColor: colors.bg,
+                  marginTop: 10,
+                },
+              ]}
+            >
+              <Feather name="calendar" size={18} color={colors.primary} />
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[styles.pickOptionTitle, { color: colors.text }]}>I will pick up at…</Text>
+                <Text style={[styles.pickOptionSub, { color: colors.subtle }]}>
+                  Choose a date and time that works for you.
+                </Text>
+              </View>
+              {pickupChoice === 'scheduled' ? <Feather name="check-circle" size={20} color={colors.primary} /> : null}
+            </TouchableOpacity>
+
+            {pickupChoice === 'scheduled' ? (
+              <View style={{ marginTop: 12 }}>
+                <TouchableOpacity
+                  onPress={() => Platform.OS === 'android' && openPickupPicker()}
+                  style={[styles.timePreviewRow, { borderColor: colors.border, backgroundColor: colors.bg }]}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.timePreviewLabel, { color: colors.subtle }]}>PICKUP DATE & TIME</Text>
+                  <Text style={[styles.timePreviewValue, { color: colors.text }]}>
+                    {pickupAtDate.toLocaleString()}
+                  </Text>
+                  {Platform.OS === 'android' ? (
+                    <Text style={[styles.timePreviewTap, { color: colors.primary }]}>Tap to change time</Text>
+                  ) : null}
+                </TouchableOpacity>
+                {Platform.OS === 'ios' ? (
+                  <View
+                    style={[styles.iosPickerShell, { backgroundColor: colors.bg, borderColor: colors.border }]}
+                  >
+                    <DateTimePicker
+                      value={pickupAtDate}
+                      mode="datetime"
+                      display="spinner"
+                      minimumDate={new Date()}
+                      themeVariant={isDark ? 'dark' : 'light'}
+                      onChange={(_, date) => {
+                        if (date) setPickupAtDate(date);
+                      }}
+                    />
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            <View style={[styles.modalActions, { marginTop: 20 }]}>
+              <TouchableOpacity
+                onPress={() => {
+                  if (joining) return;
+                  setShowJoinOptionsModal(false);
+                  setGroceryListText(pendingJoinGroceryList);
+                  setShowGroceryModal(true);
+                }}
+                activeOpacity={0.9}
+                style={[styles.modalBtn, { borderColor: colors.border }]}
+              >
+                <Text style={[styles.modalBtnText, { color: colors.text }]}>Back</Text>
+              </TouchableOpacity>
+              <View style={{ width: 12 }} />
+              <TouchableOpacity
+                onPress={confirmStandardJoin}
+                disabled={joining}
+                activeOpacity={0.9}
+                style={[
+                  styles.modalPrimaryBtn,
+                  { backgroundColor: colors.primary, opacity: joining ? 0.7 : 1, flex: 1 },
+                ]}
+              >
+                <Text style={styles.modalPrimaryText}>{joining ? 'Joining…' : 'Join queue'}</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  ) : null;
 
   if (!shopId) {
     const filteredHistory = historyQueues.filter((q) => {
@@ -620,6 +939,12 @@ export default function QueueScreen({ route, navigation }) {
                       No grocery list
                     </Text>
                   )}
+
+                  {q.pickupAt && !Number.isNaN(new Date(q.pickupAt).getTime()) ? (
+                    <Text style={[styles.queueMeta, { color: colors.subtle }]}>
+                      Pickup: {new Date(q.pickupAt).toLocaleString()}
+                    </Text>
+                  ) : null}
                 </TouchableOpacity>
 
                 <View style={styles.actionRow}>
@@ -705,12 +1030,10 @@ export default function QueueScreen({ route, navigation }) {
     );
   }
 
-  const waitingCount =
-    queue?.entries?.filter((e) => e.status === 'waiting').length ?? 0;
-
   return (
     <View style={[styles.container, { backgroundColor: colors.bg }]}>
       {groceryModal}
+      {joinOptionsModal}
 
       <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: 110 }]}>
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -752,6 +1075,9 @@ export default function QueueScreen({ route, navigation }) {
             </Text>
             {shopDetails?.address ? (
               <Text style={[styles.shopAddr, { color: colors.subtle }]}>{shopDetails.address}</Text>
+            ) : null}
+            {myPickupLabel ? (
+              <Text style={[styles.queueMeta, { color: colors.subtle }]}>{myPickupLabel}</Text>
             ) : null}
             <View style={styles.actionRow}>
             <TouchableOpacity
@@ -939,6 +1265,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '900' },
+  joinOptionsCard: { maxHeight: 560 },
+  priorityPayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 2,
+    marginTop: 12,
+  },
+  priorityIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  priorityPayTitle: { fontSize: 16, fontWeight: '900' },
+  priorityPaySub: { fontSize: 12, marginTop: 4, fontWeight: '700', lineHeight: 17 },
+  orDivider: { textAlign: 'center', marginTop: 14, marginBottom: 4, fontSize: 12, fontWeight: '800' },
+  joinSectionLabel: { marginTop: 14, fontSize: 13, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
+  pickOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 2,
+  },
+  pickOptionTitle: { fontSize: 15, fontWeight: '900' },
+  pickOptionSub: { fontSize: 12, marginTop: 4, fontWeight: '700', lineHeight: 17 },
+  timePreviewRow: { borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 4 },
+  timePreviewLabel: { fontSize: 11, fontWeight: '900' },
+  timePreviewValue: { fontSize: 16, fontWeight: '900', marginTop: 6 },
+  timePreviewTap: { fontSize: 12, fontWeight: '800', marginTop: 8 },
+  iosPickerShell: {
+    marginTop: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+
   card: {
     borderRadius: 12,
     padding: 20,

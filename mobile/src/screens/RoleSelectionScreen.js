@@ -4,11 +4,11 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Alert,
 } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
+import { appAlert } from '../utils/appAlert';
 
 export default function RoleSelectionScreen({ navigation }) {
   const { user, setRole } = useAuth();
@@ -33,7 +33,7 @@ export default function RoleSelectionScreen({ navigation }) {
     try {
       await setRole(selected);
     } catch (e) {
-      Alert.alert(
+      appAlert(
         'Update failed',
         e.response?.data?.message || e.message || 'Try again.'
       );

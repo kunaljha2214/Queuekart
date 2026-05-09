@@ -7,7 +7,6 @@ import {
   View,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +16,7 @@ import { orderlyFlow } from '../theme/orderlyFlow';
 import QueueKartLogoMark from '../components/QueueKartLogoMark';
 import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
 import Feather from 'react-native-vector-icons/Feather';
+import { appAlert } from '../utils/appAlert';
 
 const { colors, radius, spacing, type } = orderlyFlow;
 
@@ -84,7 +84,7 @@ export default function LoginScreen({ navigation }) {
     const normalizedPassword = password.trim();
 
     if (!normalizedEmail || !normalizedPassword) {
-      Alert.alert('Missing fields', 'Enter email and password.');
+      appAlert('Missing fields', 'Enter email and password.');
       return;
     }
     setLoading(true);
@@ -93,7 +93,7 @@ export default function LoginScreen({ navigation }) {
     } catch (e) {
       const msg =
         e.response?.data?.message || e.message || 'Could not sign in.';
-      Alert.alert('Login failed', msg);
+      appAlert('Login failed', msg);
     } finally {
       setLoading(false);
     }
@@ -102,7 +102,7 @@ export default function LoginScreen({ navigation }) {
   async function onForgotPassword() {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
-      Alert.alert('Enter email', 'Please enter your account email first.');
+      appAlert('Enter email', 'Please enter your account email first.');
       return;
     }
     setOtpLoading(true);
@@ -110,9 +110,9 @@ export default function LoginScreen({ navigation }) {
       const data = await requestLoginOtp(normalizedEmail);
       setOtpSent(true);
       setResendSeconds(30);
-      Alert.alert('OTP sent', data.devOtp ? `Use OTP: ${data.devOtp}` : data.message);
+      appAlert('OTP sent', data.devOtp ? `Use OTP: ${data.devOtp}` : data.message);
     } catch (e) {
-      Alert.alert('Could not send OTP', e.response?.data?.message || e.message);
+      appAlert('Could not send OTP', e.response?.data?.message || e.message);
     } finally {
       setOtpLoading(false);
     }
@@ -122,21 +122,21 @@ export default function LoginScreen({ navigation }) {
     const normalizedEmail = email.trim().toLowerCase();
     const normalizedOtp = otp.trim();
     if (!normalizedEmail || !normalizedOtp) {
-      Alert.alert('Missing fields', 'Enter email and OTP.');
+      appAlert('Missing fields', 'Enter email and OTP.');
       return;
     }
     setOtpLoading(true);
     try {
       await loginWithOtp(normalizedEmail, normalizedOtp);
     } catch (e) {
-      Alert.alert('OTP login failed', e.response?.data?.message || e.message);
+      appAlert('OTP login failed', e.response?.data?.message || e.message);
     } finally {
       setOtpLoading(false);
     }
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -280,8 +280,8 @@ function createStyles(ui) {
     scroll: {
       flexGrow: 1,
       paddingHorizontal: spacing.marginMobile,
-      paddingTop: spacing.stackLg,
-      paddingBottom: spacing.stackLg,
+      paddingTop: 0,
+      paddingBottom: 0,
       justifyContent: 'center',
     },
     brandRow: {

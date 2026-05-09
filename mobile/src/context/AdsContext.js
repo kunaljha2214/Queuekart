@@ -1,7 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
-import mobileAds from 'react-native-google-mobile-ads';
+import mobileAds, { TestIds } from 'react-native-google-mobile-ads';
 import { client } from '../services/api';
+import { FORCE_ADMOB_TEST_IDS } from '../config/api';
+
+function useTestIdFallback() {
+  if (FORCE_ADMOB_TEST_IDS) return true;
+  return typeof __DEV__ !== 'undefined' && __DEV__;
+}
 
 const AdsContext = createContext({
   placements: [],
@@ -57,7 +63,9 @@ export function AdsProvider({ children }) {
         (x) => x.placementKey === placementKey && String(x.adType).toLowerCase() === 'banner'
       );
       const id = row?.adUnitId;
-      return typeof id === 'string' && id.trim() ? id.trim() : null;
+      if (typeof id === 'string' && id.trim()) return id.trim();
+      if (useTestIdFallback() && TestIds?.BANNER) return TestIds.BANNER;
+      return null;
     },
     [placements]
   );
@@ -68,7 +76,9 @@ export function AdsProvider({ children }) {
         (x) => x.placementKey === placementKey && String(x.adType).toLowerCase() === 'interstitial'
       );
       const id = row?.adUnitId;
-      return typeof id === 'string' && id.trim() ? id.trim() : null;
+      if (typeof id === 'string' && id.trim()) return id.trim();
+      if (useTestIdFallback() && TestIds?.INTERSTITIAL) return TestIds.INTERSTITIAL;
+      return null;
     },
     [placements]
   );

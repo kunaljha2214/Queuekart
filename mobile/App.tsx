@@ -10,14 +10,26 @@ import { NavigationContainer } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import AppAlertHost from './src/components/AppAlertHost';
 import { AdsProvider } from './src/context/AdsContext';
 import { AuthProvider } from './src/context/AuthContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import RootNavigator from './src/navigation/RootNavigator';
+import { initPushListeners } from './src/services/pushNotifications';
+import SplashScreen from './src/screens/SplashScreen';
+
+const MIN_SPLASH_MS = 1500;
 
 function AppShell() {
   const { isDark, ready } = useTheme();
-  if (!ready) return null;
+  const [minElapsed, setMinElapsed] = React.useState(false);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => setMinElapsed(true), MIN_SPLASH_MS);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!ready || !minElapsed) return <SplashScreen />;
   return (
     <AuthProvider>
       <NavigationContainer>
@@ -29,6 +41,11 @@ function AppShell() {
 }
 
 function App() {
+  React.useEffect(() => {
+    const cleanup = initPushListeners();
+    return cleanup;
+  }, []);
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -36,6 +53,7 @@ function App() {
           <AdsProvider>
             <AppShell />
           </AdsProvider>
+          <AppAlertHost />
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

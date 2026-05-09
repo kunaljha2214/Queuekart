@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_bg" />
+
+    <!-- subtle circles -->
+    <item>
+        <shape android:shape="oval">
+            <size android:width="520dp" android:height="520dp" />
+            <solid android:color="@color/splash_circle" />
+        </shape>
+    </item>
+
+    <item android:gravity="bottom|start" android:left="-180dp" android:bottom="-160dp">
+        <shape android:shape="oval">
+            <size android:width="420dp" android:height="420dp" />
+            <solid android:color="@color/splash_circle" />
+        </shape>
+    </item>
+
+    <!-- center logo (reuses app icon) -->
+    <item android:gravity="center">
+        <bitmap
+            android:gravity="center"
+            android:src="@mipmap/ic_launcher"
+            android:tileMode="disabled" />
+    </item>
+</layer-list>
+

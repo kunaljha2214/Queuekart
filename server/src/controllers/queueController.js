@@ -1,5 +1,48 @@
+const crypto = require('crypto');
+const Razorpay = require('razorpay');
 const Queue = require('../models/Queue');
 const Shop = require('../models/Shop');
+const UsedRazorpayPayment = require('../models/UsedRazorpayPayment');
+const { loadEnv } = require('../config/env');
+const { sendToUser } = require('../services/pushService');
+
+function computeWaitMinutes({ orderedActiveEntries, yourIndex, perRealAheadMinutes }) {
+  const ahead = orderedActiveEntries.slice(0, Math.max(0, yourIndex));
+  const walkInMinutes = ahead.reduce((sum, e) => {
+    const isWalkIn = !e.user;
+    if (!isWalkIn) return sum;
+    const m = Number.isFinite(e.estimatedMinutes) ? e.estimatedMinutes : 0;
+    return sum + Math.max(0, m);
+  }, 0);
+  const realAhead = ahead.filter((e) => Boolean(e.user)).length;
+  return walkInMinutes + realAhead * perRealAheadMinutes;
+}
+
+async function maybeNotifyTurnSoon({ shop, queue }) {
+  const ordered = (queue.entries || [])
+    .filter((e) => e.status === 'waiting' || e.status === 'serving')
+    .sort((a, b) => a.position - b.position);
+
+  const target = ordered.find((e) => e.position === 2 && e.user && !e.turnSoonNotifiedAt);
+  if (!target) return false;
+
+  target.turnSoonNotifiedAt = new Date();
+  await queue.save();
+
+  await sendToUser(target.user, {
+    notification: {
+      title: 'Your turn is soon',
+      body: `${shop.name} · Please reach the shop`,
+    },
+    data: {
+      type: 'turn_soon',
+      shopId: String(shop._id),
+      shopName: String(shop.name || ''),
+      yourPosition: '2',
+    },
+  });
+  return true;
+}
 
 function emitQueueUpdate(io, shopId, queueDoc) {
   const payload = serializeQueue(queueDoc);
@@ -16,6 +59,8 @@ function serializeQueue(queue) {
       walkInName: e.walkInName || '',
       estimatedMinutes: Number.isFinite(e.estimatedMinutes) ? e.estimatedMinutes : 0,
       groceryList: e.groceryList || '',
+      pickupAt: e.pickupAt || null,
+      joinKind: e.joinKind === 'priority_second' ? 'priority_second' : 'standard',
       position: e.position,
       status: e.status,
       joinedAt: e.joinedAt,
@@ -127,6 +172,7 @@ async function getMyQueues(req, res, next) {
           position: '$entries.position',
           joinedAt: '$entries.joinedAt',
           groceryList: '$entries.groceryList',
+          pickupAt: '$entries.pickupAt',
         },
       },
       { $sort: { joinedAt: -1 } },
@@ -182,6 +228,81 @@ async function getMyQueueHistory(req, res, next) {
   }
 }
 
+function parsePickupAt(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function reorderPriorityOrAppend(queue, newEntryId, { prioritySecond }) {
+  const active = queue.entries
+    .filter((e) => e.status === 'waiting' || e.status === 'serving')
+    .sort((a, b) => a.position - b.position);
+  const ne = queue.entries.id(newEntryId);
+  if (!ne) return;
+  const others = active.filter((e) => !e._id.equals(ne._id));
+  let ordered;
+  if (prioritySecond && others.length > 0) {
+    ordered = [others[0], ne, ...others.slice(1)];
+  } else {
+    ordered = [...others, ne];
+  }
+  ordered.forEach((e, i) => {
+    e.position = i + 1;
+  });
+}
+
+async function verifyPriorityQueuePayment(body, { shopId, userId, expectedAmountPaise }) {
+  const razorpay_order_id = String(body?.razorpay_order_id || '').trim();
+  const razorpay_payment_id = String(body?.razorpay_payment_id || '').trim();
+  const razorpay_signature = String(body?.razorpay_signature || '').trim();
+  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+    return { ok: false, status: 400, message: 'Payment details required for priority join' };
+  }
+  const env = loadEnv();
+  if (!env.razorpayKeyId || !env.razorpayKeySecret) {
+    return { ok: false, status: 503, message: 'Payments not configured on server' };
+  }
+  const expectedSig = crypto
+    .createHmac('sha256', env.razorpayKeySecret)
+    .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+    .digest('hex');
+  if (expectedSig !== razorpay_signature) {
+    return { ok: false, status: 400, message: 'Invalid payment signature' };
+  }
+  const used = await UsedRazorpayPayment.findOne({ paymentId: razorpay_payment_id }).lean();
+  if (used) {
+    return { ok: false, status: 400, message: 'This payment was already used' };
+  }
+  try {
+    const rzp = new Razorpay({ key_id: env.razorpayKeyId, key_secret: env.razorpayKeySecret });
+    const payment = await rzp.payments.fetch(razorpay_payment_id);
+    const amount = Number(payment.amount);
+    if (!Number.isFinite(amount) || amount !== expectedAmountPaise) {
+      return { ok: false, status: 400, message: 'Invalid payment amount' };
+    }
+    const st = String(payment.status || '').toLowerCase();
+    if (st !== 'captured' && st !== 'authorized') {
+      return { ok: false, status: 400, message: 'Payment not completed' };
+    }
+    const notes = payment.notes || {};
+    if (String(notes.purpose || '') !== 'queue_priority_second') {
+      return { ok: false, status: 400, message: 'Payment is not for queue priority' };
+    }
+    if (String(notes.shopId || '') !== String(shopId)) {
+      return { ok: false, status: 400, message: 'Payment shop mismatch' };
+    }
+    if (String(notes.userId || '') !== String(userId)) {
+      return { ok: false, status: 400, message: 'Payment account mismatch' };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error('priority payment fetch:', e?.message || e);
+    return { ok: false, status: 400, message: 'Could not verify payment' };
+  }
+}
+
 async function join(req, res, next) {
   try {
     const io = req.app.get('io');
@@ -224,10 +345,44 @@ async function join(req, res, next) {
         yourPosition: position >= 0 ? position + 1 : existing.position,
       });
     }
-    const active = queue.entries.filter(
+    const env = loadEnv();
+    const threshold = Number.isFinite(env.queuePriorityWaitingThreshold)
+      ? env.queuePriorityWaitingThreshold
+      : 5;
+    const priorityPricePaise = Number.isFinite(env.queuePriorityPricePaise)
+      ? env.queuePriorityPricePaise
+      : 2500;
+
+    const joinKindReq = String(req.body?.joinKind || 'standard').toLowerCase();
+    const wantPriority =
+      joinKindReq === 'priority_second' ||
+      joinKindReq === 'priority' ||
+      joinKindReq === 'priority_pay';
+    const waitingOnlyCount = queue.entries.filter((e) => e.status === 'waiting').length;
+
+    if (wantPriority) {
+      if (waitingOnlyCount <= threshold) {
+        return res.status(400).json({
+          message: `Priority join is only available when more than ${threshold} customers are waiting (currently ${waitingOnlyCount}).`,
+        });
+      }
+      const v = await verifyPriorityQueuePayment(req.body, {
+        shopId: shop._id,
+        userId: req.user._id,
+        expectedAmountPaise: priorityPricePaise,
+      });
+      if (!v.ok) {
+        return res.status(v.status || 400).json({ message: v.message });
+      }
+    }
+
+    const pickupParsed = parsePickupAt(req.body?.pickupAt);
+    const pickupAt = pickupParsed || undefined;
+
+    const activeAll = queue.entries.filter(
       (e) => e.status === 'waiting' || e.status === 'serving'
     );
-    const maxPos = active.reduce((m, e) => Math.max(m, e.position), 0);
+    const maxPos = activeAll.reduce((m, e) => Math.max(m, e.position), 0);
     const listText = String(req.body?.groceryList || '').trim();
     queue.entries.push({
       user: req.user._id,
@@ -235,16 +390,76 @@ async function join(req, res, next) {
       position: maxPos + 1,
       status: 'waiting',
       groceryList: listText ? listText.slice(0, 2000) : '',
+      pickupAt,
+      joinKind: wantPriority ? 'priority_second' : 'standard',
     });
     await queue.save();
+    const newEntry = queue.entries[queue.entries.length - 1];
+    reorderPriorityOrAppend(queue, newEntry._id, {
+      prioritySecond: wantPriority,
+    });
+    await queue.save();
+
+    if (wantPriority && req.body?.razorpay_payment_id) {
+      try {
+        await UsedRazorpayPayment.create({
+          paymentId: String(req.body.razorpay_payment_id).trim(),
+          userId: req.user._id,
+          shopId: shop._id,
+          purpose: 'queue_priority_second',
+        });
+      } catch (e) {
+        if (e?.code !== 11000) {
+          console.error('UsedRazorpayPayment create:', e?.message || e);
+        }
+      }
+    }
+
     await queue.populate('entries.user', 'name email phone');
     emitQueueUpdate(io, shop._id.toString(), queue);
-    const newEntry = queue.entries[queue.entries.length - 1];
     const ordered = queue.entries
       .filter((e) => e.status === 'waiting' || e.status === 'serving')
       .sort((a, b) => a.position - b.position);
     const yourPosition =
       ordered.findIndex((e) => e._id.equals(newEntry._id)) + 1;
+
+    const perRealAheadMinutes = Number.isFinite(env.fcmDefaultRealCustomerMinutes)
+      ? env.fcmDefaultRealCustomerMinutes
+      : 20;
+    const waitMinutes = computeWaitMinutes({
+      orderedActiveEntries: ordered,
+      yourIndex: Math.max(0, yourPosition - 1),
+      perRealAheadMinutes,
+    });
+
+    await sendToUser(req.user._id, {
+      notification: {
+        title: 'Queue joined',
+        body: `${shop.name} · Your number: ${yourPosition} · Est wait: ${waitMinutes} min`,
+      },
+      data: {
+        type: 'queue_joined',
+        shopId: String(shop._id),
+        shopName: String(shop.name || ''),
+        yourPosition: String(yourPosition),
+        waitMinutes: String(waitMinutes),
+      },
+    });
+
+    if (shop.owner) {
+      await sendToUser(shop.owner, {
+        notification: {
+          title: 'New customer joined',
+          body: `${shop.name} · Queue number: ${yourPosition}`,
+        },
+        data: {
+          type: 'owner_customer_joined',
+          shopId: String(shop._id),
+          shopName: String(shop.name || ''),
+          position: String(yourPosition),
+        },
+      });
+    }
     res.status(201).json({
       ...serializeQueue(queue),
       yourEntryId: newEntry._id,
@@ -280,6 +495,7 @@ async function leave(req, res, next) {
     await queue.save();
     await queue.populate('entries.user', 'name email phone');
     emitQueueUpdate(io, shop._id.toString(), queue);
+    await maybeNotifyTurnSoon({ shop, queue });
     res.json({ ok: true, queue: serializeQueue(queue) });
   } catch (e) {
     next(e);
@@ -327,6 +543,7 @@ async function ownerAddWalkIn(req, res, next) {
     await queue.save();
     await queue.populate('entries.user', 'name email phone');
     emitQueueUpdate(io, shop._id.toString(), queue);
+    await maybeNotifyTurnSoon({ shop, queue });
     return res.status(201).json(serializeQueue(queue));
   } catch (e) {
     next(e);
@@ -415,6 +632,7 @@ async function ownerNext(req, res, next) {
     await queue.save();
     await queue.populate('entries.user', 'name email phone');
     emitQueueUpdate(io, shop._id.toString(), queue);
+    await maybeNotifyTurnSoon({ shop, queue });
     res.json(serializeQueue(queue));
   } catch (e) {
     next(e);
@@ -442,6 +660,7 @@ async function ownerComplete(req, res, next) {
     await queue.save();
     await queue.populate('entries.user', 'name email phone');
     emitQueueUpdate(io, shop._id.toString(), queue);
+    await maybeNotifyTurnSoon({ shop, queue });
     res.json(serializeQueue(queue));
   } catch (e) {
     next(e);
@@ -472,6 +691,7 @@ async function ownerRemoveEntry(req, res, next) {
     await queue.save();
     await queue.populate('entries.user', 'name email phone');
     emitQueueUpdate(io, shop._id.toString(), queue);
+    await maybeNotifyTurnSoon({ shop, queue });
     res.json(serializeQueue(queue));
   } catch (e) {
     next(e);

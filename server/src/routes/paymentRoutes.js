@@ -24,7 +24,7 @@ function verifyWebhook(req) {
 
 function requireRazorpayConfigured(res) {
   if (!env.razorpayKeyId || !env.razorpayKeySecret) {
-    res.status(500).json({ message: 'Razorpay keys not configured on server' });
+    res.status(503).json({ message: 'Razorpay keys not configured on server' });
     return false;
   }
   return true;
@@ -85,6 +85,60 @@ router.post(
       });
     } catch (e) {
       console.error('Razorpay order error:', e?.message || e);
+      const status = e?.statusCode || 500;
+      const msg = e?.error?.description || e?.error?.code || e?.message || 'Payment order failed';
+      return       res.status(status).json({ message: msg });
+    }
+  }
+);
+
+/** Customer: ₹25 Razorpay order to skip ahead to 2nd place (only valid when queue is long; verified on join). */
+router.post(
+  '/razorpay/queue-priority-order',
+  auth(true),
+  [body('shopId').notEmpty().isMongoId()],
+  async (req, res, next) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+      }
+      if (!requireRazorpayConfigured(res)) return;
+
+      const cfg = loadEnv();
+      const amountPaise =
+        Number.isFinite(cfg.queuePriorityPricePaise) && cfg.queuePriorityPricePaise > 0
+          ? cfg.queuePriorityPricePaise
+          : 2500;
+      const { shopId } = req.body;
+      const shop = await Shop.findOne({ _id: shopId, isActive: true });
+      if (!shop) {
+        return res.status(404).json({ message: 'Shop not found or inactive' });
+      }
+
+      const rzp = new Razorpay({ key_id: cfg.razorpayKeyId, key_secret: cfg.razorpayKeySecret });
+      const receipt = `qp_${String(shopId).slice(-8)}_${String(Date.now()).slice(-8)}`;
+      const order = await rzp.orders.create({
+        amount: amountPaise,
+        currency: 'INR',
+        receipt,
+        notes: {
+          purpose: 'queue_priority_second',
+          shopId: String(shopId),
+          userId: String(req.user._id),
+        },
+      });
+
+      res.json({
+        keyId: cfg.razorpayKeyId,
+        amount: amountPaise,
+        currency: 'INR',
+        orderId: order.id,
+        shopId: String(shop._id),
+        shopName: shop.name,
+      });
+    } catch (e) {
+      console.error('Queue priority Razorpay order error:', e?.message || e);
       const status = e?.statusCode || 500;
       const msg = e?.error?.description || e?.error?.code || e?.message || 'Payment order failed';
       return res.status(status).json({ message: msg });

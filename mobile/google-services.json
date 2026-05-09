@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "134061578512",
+    "project_id": "queuekart-be88f",
+    "storage_bucket": "queuekart-be88f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:134061578512:android:21ce3b02a4e9d6adb12d95",
+        "android_client_info": {
+          "package_name": "com.queuekartmobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAVmB8SLtWTUvZDsis0DK7JlYn5OlsEK9I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

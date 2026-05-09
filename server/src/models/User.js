@@ -20,6 +20,14 @@ const userSchema = new mongoose.Schema(
     },
     otpLoginHash: { type: String, select: false, default: null },
     otpLoginExpiresAt: { type: Date, select: false, default: null },
+    fcmTokens: [
+      {
+        token: { type: String, trim: true, required: true },
+        platform: { type: String, enum: ['android', 'ios', 'web'], default: 'android' },
+        deviceId: { type: String, trim: true, default: '' },
+        updatedAt: { type: Date, default: Date.now },
+      },
+    ],
   },
   { timestamps: true }
 );

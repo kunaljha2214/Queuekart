@@ -14,6 +14,7 @@ const queueRoutes = require('./routes/queueRoutes');
 const orderItemRoutes = require('./routes/orderItemRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const adRoutes = require('./routes/adRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 
 const env = loadEnv();
 
@@ -22,7 +23,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: env.clientOrigin === '*' ? true : env.clientOrigin,
+    origin: env.corsOrigins === '*' ? true : env.corsOrigins,
     methods: ['GET', 'POST'],
   },
 });
@@ -32,7 +33,7 @@ registerSocketHandlers(io);
 
 app.use(
   cors({
-    origin: env.clientOrigin === '*' ? true : env.clientOrigin,
+    origin: env.corsOrigins === '*' ? true : env.corsOrigins,
     credentials: true,
   })
 );
@@ -48,6 +49,7 @@ app.use('/api/shops/:shopId/items', orderItemRoutes);
 app.use('/api/queues', queueRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/ads', adRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 app.use(errorHandler);
 

@@ -18,6 +18,16 @@ const queueEntrySchema = new mongoose.Schema(
     },
     joinedAt: { type: Date, default: Date.now },
     groceryList: { type: String, trim: true, default: '' },
+    /** Customer preferred pickup time (optional; null = flexible / queue order) */
+    pickupAt: { type: Date, default: null },
+    /** How the customer joined: end of line vs paid skip to 2nd */
+    joinKind: {
+      type: String,
+      enum: ['standard', 'priority_second'],
+      default: 'standard',
+    },
+    /** Prevent duplicate "turn soon" pushes */
+    turnSoonNotifiedAt: { type: Date, default: null },
   },
   { _id: true }
 );
