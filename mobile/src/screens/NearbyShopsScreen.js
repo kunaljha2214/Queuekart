@@ -35,7 +35,10 @@ export default function NearbyShopsScreen({ navigation }) {
   const { logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
   const [coords, setCoords] = useState(null);
-  const [shops, setShops] = useState([]);
+  const [nearbyShops, setNearbyShops] = useState([]);
+  const [allShops, setAllShops] = useState([]);
+  const [listMode, setListMode] = useState('nearby'); // 'nearby' | 'all'
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -83,7 +86,12 @@ export default function NearbyShopsScreen({ navigation }) {
     const { data } = await client.get('/shops/nearby', {
       params: { lat, lng, maxDistance: 10000 },
     });
-    setShops(data.shops || []);
+    setNearbyShops(data.shops || []);
+  }, []);
+
+  const fetchAllShopsDirectory = useCallback(async () => {
+    const { data } = await client.get('/shops/directory');
+    setAllShops(data.shops || []);
   }, []);
 
   const refreshFromCurrentLocation = useCallback(async (opts) => {
@@ -125,6 +133,29 @@ export default function NearbyShopsScreen({ navigation }) {
   }, [fetchNearby]);
 
   useEffect(() => {
+    if (listMode !== 'all') return;
+    let cancelled = false;
+    (async () => {
+      setCatalogLoading(true);
+      setLastError('');
+      try {
+        await fetchAllShopsDirectory();
+      } catch (e) {
+        if (!cancelled) {
+          const msg = e?.response?.data?.message || e?.message || 'Could not load all shops.';
+          setLastError(msg);
+          appAlert('Error', msg);
+        }
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [listMode, fetchAllShopsDirectory]);
+
+  useEffect(() => {
     let mounted = true;
     (async () => {
       try {
@@ -159,10 +190,11 @@ export default function NearbyShopsScreen({ navigation }) {
   }
 
   const filtered = useMemo(() => {
+    const source = listMode === 'nearby' ? nearbyShops : allShops;
     const q = query.trim().toLowerCase();
     const list = !q
-      ? shops
-      : shops.filter((s) => {
+      ? source
+      : source.filter((s) => {
           const name = String(s.name || '').toLowerCase();
           const addr = String(s.address || '').toLowerCase();
           return name.includes(q) || addr.includes(q);
@@ -174,7 +206,12 @@ export default function NearbyShopsScreen({ navigation }) {
       return sorted;
     }
 
-    if (!coords) return sorted;
+    if (!coords) {
+      if (listMode === 'all') {
+        sorted.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+      }
+      return sorted;
+    }
     sorted.sort((a, b) => {
       const aC = a?.location?.coordinates;
       const bC = b?.location?.coordinates;
@@ -189,7 +226,7 @@ export default function NearbyShopsScreen({ navigation }) {
       return (Number.isFinite(aKm) ? aKm : 1e9) - (Number.isFinite(bKm) ? bKm : 1e9);
     });
     return sorted;
-  }, [shops, query, sortMode, coords]);
+  }, [listMode, nearbyShops, allShops, query, sortMode, coords]);
 
   const Chip = useCallback(
     ({ label, active, onPress }) => (
@@ -245,9 +282,11 @@ export default function NearbyShopsScreen({ navigation }) {
       <View style={styles.headerWrap}>
         <View style={styles.titleRow}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.screenTitle, { color: colors.text }]}>Find Nearby Shops</Text>
+            <Text style={[styles.screenTitle, { color: colors.text }]}>
+              {listMode === 'nearby' ? 'Find Nearby Shops' : 'All shops'}
+            </Text>
             <Text style={[styles.screenSubTitle, { color: colors.subtle }]}>
-              Wait less, Live more.
+              {listMode === 'nearby' ? 'Wait less, Live more.' : 'Every shop on QueueKart — search by name.'}
             </Text>
           </View>
           <ThemeToggleSwitch isDark={isDark} onToggle={toggleTheme} />
@@ -257,7 +296,7 @@ export default function NearbyShopsScreen({ navigation }) {
           <Feather name="search" size={18} color={colors.subtle} style={{ marginRight: 10 }} />
           <TextInput
             style={[styles.searchInput, { color: colors.text }]}
-            placeholder="Search shops"
+            placeholder={listMode === 'nearby' ? 'Search shops' : 'Search by shop name'}
             placeholderTextColor={colors.subtle}
             value={query}
             onChangeText={setQuery}
@@ -282,15 +321,46 @@ export default function NearbyShopsScreen({ navigation }) {
             onPress={() => setSortMode('leastQueue')}
           />
           <View style={{ width: 8 }} />
+          <Chip
+            label="All shops"
+            active={listMode === 'all'}
+            onPress={() => setListMode((m) => (m === 'all' ? 'nearby' : 'all'))}
+          />
+          <View style={{ width: 8 }} />
           <LocationChip onPress={() => refreshFromCurrentLocation({ mode: 'refresh' })} />
         </View>
+
+        {listMode === 'all' && catalogLoading ? (
+          <View style={styles.catalogLoadingRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={[styles.catalogLoadingText, { color: colors.subtle }]}>Loading directory…</Text>
+          </View>
+        ) : null}
 
         <AdMobBanner placementKey={PLACEMENT_NEARBY_SHOPS_HEADER} />
       </View>
     );
-  }, [colors, query, refreshFromCurrentLocation, sortMode, Chip, LocationChip]);
+  }, [colors, query, listMode, catalogLoading, refreshFromCurrentLocation, sortMode, Chip, LocationChip]);
 
   const emptyComponent = useMemo(() => {
+    if (listMode === 'all' && catalogLoading) {
+      return (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.emptyHint, { color: colors.subtle, marginTop: 14 }]}>Loading all shops…</Text>
+        </View>
+      );
+    }
+    const emptyTitle =
+      listMode === 'all'
+        ? query.trim()
+          ? 'No shops match your search'
+          : 'No shops available'
+        : 'No shops found near you';
+    const emptyHint =
+      listMode === 'all'
+        ? 'Try a different name or pull down to refresh.'
+        : 'Try using your current location or adjust search and filters.';
     return (
       <View style={styles.emptyState}>
         <View style={[styles.illus, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -298,12 +368,26 @@ export default function NearbyShopsScreen({ navigation }) {
           <View style={{ height: 10 }} />
           <Feather name="search" size={22} color={colors.subtle} />
         </View>
-        <Text style={[styles.emptyTitle, { color: colors.text }]}>No shops found near you</Text>
-        <Text style={[styles.emptyHint, { color: colors.subtle }]}>
-          Try using your current location or adjust search and filters.
-        </Text>
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>{emptyTitle}</Text>
+        <Text style={[styles.emptyHint, { color: colors.subtle }]}>{emptyHint}</Text>
         <TouchableOpacity
-          onPress={() => refreshFromCurrentLocation({ mode: 'refresh' })}
+          onPress={async () => {
+            if (listMode === 'all') {
+              setCatalogLoading(true);
+              setLastError('');
+              try {
+                await fetchAllShopsDirectory();
+              } catch (e) {
+                const msg = e?.response?.data?.message || e?.message || 'Could not load all shops.';
+                setLastError(msg);
+                appAlert('Error', msg);
+              } finally {
+                setCatalogLoading(false);
+              }
+            } else {
+              refreshFromCurrentLocation({ mode: 'refresh' });
+            }
+          }}
           activeOpacity={0.85}
           style={[styles.retryBtn, { backgroundColor: colors.primary }]}
         >
@@ -314,7 +398,7 @@ export default function NearbyShopsScreen({ navigation }) {
         ) : null}
       </View>
     );
-  }, [colors, refreshFromCurrentLocation, lastError]);
+  }, [colors, refreshFromCurrentLocation, fetchAllShopsDirectory, lastError, listMode, catalogLoading, query]);
 
   function openShop(shop, opts = {}) {
     navigation.navigate('Queue', {
@@ -390,7 +474,23 @@ export default function NearbyShopsScreen({ navigation }) {
         data={filtered}
         keyExtractor={(item) => item._id}
         refreshing={refreshing}
-        onRefresh={() => refreshFromCurrentLocation({ mode: 'refresh' })}
+        onRefresh={async () => {
+          if (listMode === 'all') {
+            setRefreshing(true);
+            setLastError('');
+            try {
+              await fetchAllShopsDirectory();
+            } catch (e) {
+              const msg = e?.response?.data?.message || e?.message || 'Could not refresh.';
+              setLastError(msg);
+              appAlert('Error', msg);
+            } finally {
+              setRefreshing(false);
+            }
+          } else {
+            refreshFromCurrentLocation({ mode: 'refresh' });
+          }
+        }}
         ListHeaderComponent={listHeader}
         contentContainerStyle={[
           filtered.length === 0 ? styles.emptyList : null,
@@ -525,7 +625,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   searchInput: { flex: 1, fontSize: 15, fontWeight: '600' },
-  chipRow: { flexDirection: 'row', paddingHorizontal: 12, paddingBottom: 4 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 4, rowGap: 8 },
+  catalogLoadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    gap: 10,
+  },
+  catalogLoadingText: { fontSize: 13, fontWeight: '700' },
   locChip: {
     borderWidth: 1,
     borderRadius: 999,

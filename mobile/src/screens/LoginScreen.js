@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useMemo, useState } from 'react';
 import {
+  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -13,12 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { orderlyFlow } from '../theme/orderlyFlow';
-import QueueKartLogoMark from '../components/QueueKartLogoMark';
 import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
 import Feather from 'react-native-vector-icons/Feather';
 import { appAlert } from '../utils/appAlert';
 
 const { colors, radius, spacing, type } = orderlyFlow;
+const shopLogo = require('../assets/logo-shop.png');
 
 function getAuthPalette(isDark) {
   if (isDark) {
@@ -147,7 +148,11 @@ export default function LoginScreen({ navigation }) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.brandRow}>
-            <QueueKartLogoMark size={52} />
+            <Image
+              source={shopLogo}
+              style={styles.brandLogo}
+              resizeMode="contain"
+            />
             <Text style={[styles.brandName, type.brandName]}>QueueKart</Text>
           </View>
 
@@ -285,13 +290,15 @@ function createStyles(ui) {
       justifyContent: 'center',
     },
     brandRow: {
+      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: spacing.stackMd,
     },
+    brandLogo: { width: 46, height: 46 },
     brandName: {
       color: ui.text,
-      marginTop: 10,
+      marginLeft: 12,
     },
     headline: {
       color: ui.text,

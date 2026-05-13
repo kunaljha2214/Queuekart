@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useMemo, useState } from 'react';
 import {
+  Image,
   StyleSheet,
   Text,
   TextInput,
@@ -13,12 +14,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { orderlyFlow } from '../theme/orderlyFlow';
-import QueueKartLogoMark from '../components/QueueKartLogoMark';
 import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
 import Feather from 'react-native-vector-icons/Feather';
 import { appAlert } from '../utils/appAlert';
 
 const { colors, radius, spacing, type } = orderlyFlow;
+const shopLogo = require('../assets/logo-shop.png');
 
 function getAuthPalette(isDark) {
   if (isDark) {
@@ -156,7 +157,11 @@ export default function RegisterScreen({ navigation }) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.brandRow}>
-            <QueueKartLogoMark size={48} />
+            <Image
+              source={shopLogo}
+              style={styles.brandLogo}
+              resizeMode="contain"
+            />
             <Text style={[styles.brandName, type.brandName]}>QueueKart</Text>
           </View>
 
@@ -308,7 +313,7 @@ function createStyles(ui) {
     scroll: {
       flexGrow: 1,
       paddingHorizontal: spacing.marginMobile,
-      paddingTop: spacing.stackLg,
+      paddingTop: spacing.stackSm,
       paddingBottom: spacing.stackLg,
       justifyContent: 'center',
     },
@@ -317,13 +322,14 @@ function createStyles(ui) {
       alignItems: 'center',
       justifyContent: 'center',
       alignSelf: 'center',
-      marginTop: -8,
-      marginBottom: spacing.stackSm + 2,
+      marginTop: 0,
+      marginBottom: spacing.stackMd,
     },
     brandName: {
       color: ui.text,
       marginLeft: 12,
     },
+    brandLogo: { width: 46, height: 46 },
     headline: {
       color: ui.text,
       fontSize: 34,
@@ -415,7 +421,7 @@ function createStyles(ui) {
     buttonDisabled: { opacity: 0.6 },
     buttonText: { color: ui.onPrimary, fontSize: 17, fontWeight: '700' },
     link: {
-      marginTop: spacing.stackLg,
+      marginTop: spacing.stackSm,
       alignItems: 'center',
     },
     resendLink: {

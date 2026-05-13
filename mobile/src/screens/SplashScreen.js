@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import QueueKartLogoMark from '../components/QueueKartLogoMark';
+import { useTheme } from '../context/ThemeContext';
+
+const shopLogo = require('../assets/logo-shop.png');
 
 export default function SplashScreen() {
   const [dotCount, setDotCount] = useState(1);
+  const { isDark } = useTheme();
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -23,7 +26,7 @@ export default function SplashScreen() {
 
         <View style={styles.center}>
           <View style={styles.logoTile}>
-            <QueueKartLogoMark size={56} />
+            <Image source={shopLogo} style={styles.logoImg} resizeMode="contain" />
           </View>
           <Text style={styles.title}>QueueKart</Text>
           <Text style={styles.subtitle}>Wait less, live more.</Text>
@@ -66,6 +69,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
   },
+  logoImg: { width: 64, height: 64 },
   title: { color: '#E8F0FF', fontSize: 34, fontWeight: '800', marginBottom: 6 },
   subtitle: { color: '#A8B7D4', fontSize: 15, marginBottom: 18 },
   loading: { color: '#A8B7D4', fontSize: 14, letterSpacing: 0.5 },

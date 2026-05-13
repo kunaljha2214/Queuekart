@@ -890,7 +890,7 @@ export default function OwnerDashboardV2({ navigation }) {
         const groceryList = String(entry.groceryList || '').trim();
         const pickupExtra =
           entry.joinKind === 'priority_second'
-            ? ' · Priority (₹25)'
+            ? ' · Priority'
             : entry.pickupAt && !Number.isNaN(new Date(entry.pickupAt).getTime())
               ? ` · Pickup ${new Date(entry.pickupAt).toLocaleString()}`
               : '';

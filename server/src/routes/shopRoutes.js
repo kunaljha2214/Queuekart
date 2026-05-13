@@ -16,6 +16,8 @@ router.get(
   shopController.nearby
 );
 
+router.get('/directory', auth(true), shopController.listDirectory);
+
 router.get('/:id', shopController.getById);
 
 router.post(

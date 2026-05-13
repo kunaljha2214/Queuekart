@@ -2,6 +2,53 @@ const { validationResult } = require('express-validator');
 const Shop = require('../models/Shop');
 const Queue = require('../models/Queue');
 
+const ONE_DAY_MS = 1 * 24 * 60 * 60 * 1000;
+
+/** Same visibility rules as nearby: active, open, subscription/grace OK. */
+function customerListableShopMatch() {
+  const graceSince = new Date(Date.now() - ONE_DAY_MS);
+  return {
+    isActive: true,
+    $and: [
+      { $or: [{ isOpen: true }, { isOpen: { $exists: false } }] },
+      {
+        $or: [
+          { 'subscription.isActive': true },
+          { 'subscription.nextDueAt': { $gt: graceSince } },
+          { subscriptionPaidUntil: { $gt: graceSince } },
+          { subscriptionPaidUntil: null, createdAt: { $gt: graceSince } },
+        ],
+      },
+    ],
+  };
+}
+
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function enrichShopsWithQueueCount(shops) {
+  if (!shops.length) {
+    return [];
+  }
+  const shopIds = shops.map((s) => s._id);
+  const queues = await Queue.find({ shop: { $in: shopIds } })
+    .select('shop entries.status')
+    .lean();
+
+  const queueCountByShop = new Map();
+  for (const q of queues) {
+    const entries = Array.isArray(q.entries) ? q.entries : [];
+    const active = entries.filter((e) => e.status === 'waiting' || e.status === 'serving').length;
+    queueCountByShop.set(String(q.shop), active);
+  }
+
+  return shops.map((s) => ({
+    ...s,
+    queueCount: queueCountByShop.get(String(s._id)) ?? 0,
+  }));
+}
+
 async function create(req, res, next) {
   try {
     const errors = validationResult(req);
@@ -57,24 +104,8 @@ async function nearby(req, res, next) {
     if (Number.isNaN(lat) || Number.isNaN(lng)) {
       return res.status(400).json({ message: 'lat and lng query params required' });
     }
-    const graceMs = 1 * 24 * 60 * 60 * 1000; // 1 day grace
-    const graceSince = new Date(Date.now() - graceMs);
     const shops = await Shop.find({
-      isActive: true,
-      $and: [
-        // Open for customers (missing isOpen = legacy shops, treat as open)
-        { $or: [{ isOpen: true }, { isOpen: { $exists: false } }] },
-        {
-          $or: [
-            // New subscription model:
-            { 'subscription.isActive': true },
-            { 'subscription.nextDueAt': { $gt: graceSince } },
-            // Legacy fallback:
-            { subscriptionPaidUntil: { $gt: graceSince } },
-            { subscriptionPaidUntil: null, createdAt: { $gt: graceSince } },
-          ],
-        },
-      ],
+      ...customerListableShopMatch(),
       location: {
         $near: {
           $geometry: {
@@ -88,29 +119,28 @@ async function nearby(req, res, next) {
       .populate('owner', 'name email phone')
       .limit(50)
       .lean();
-    if (!shops.length) {
-      return res.json({ shops: [] });
-    }
 
-    const shopIds = shops.map((s) => s._id);
-    const queues = await Queue.find({ shop: { $in: shopIds } })
-      .select('shop entries.status')
+    const enriched = await enrichShopsWithQueueCount(shops);
+    res.json({ shops: enriched });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** Authenticated: all customer-visible shops (no geo). Optional ?q= name substring. */
+async function listDirectory(req, res, next) {
+  try {
+    const q = String(req.query.q || '').trim();
+    const filter = { ...customerListableShopMatch() };
+    if (q) {
+      filter.name = { $regex: escapeRegex(q), $options: 'i' };
+    }
+    const shops = await Shop.find(filter)
+      .populate('owner', 'name email phone')
+      .sort({ name: 1 })
+      .limit(200)
       .lean();
-
-    const queueCountByShop = new Map();
-    for (const q of queues) {
-      const entries = Array.isArray(q.entries) ? q.entries : [];
-      const active = entries.filter(
-        (e) => e.status === 'waiting' || e.status === 'serving'
-      ).length;
-      queueCountByShop.set(String(q.shop), active);
-    }
-
-    const enriched = shops.map((s) => ({
-      ...s,
-      queueCount: queueCountByShop.get(String(s._id)) ?? 0,
-    }));
-
+    const enriched = await enrichShopsWithQueueCount(shops);
     res.json({ shops: enriched });
   } catch (e) {
     next(e);
@@ -157,4 +187,4 @@ async function update(req, res, next) {
   }
 }
 
-module.exports = { create, listMine, nearby, getById, update };
+module.exports = { create, listMine, nearby, listDirectory, getById, update };

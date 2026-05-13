@@ -30,6 +30,7 @@ import Feather from 'react-native-vector-icons/Feather';
 
 /** Must match server QUEUE_PRIORITY_WAITING_THRESHOLD (paid skip only when waiting count is greater than this). */
 const QUEUE_PAY_PRIORITY_THRESHOLD = 5;
+const MIN_PICKUP_LEAD_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 export default function QueueScreen({ route, navigation }) {
   const { shopId, shopName, promptGroceryList } = route.params || {};
@@ -379,8 +380,9 @@ export default function QueueScreen({ route, navigation }) {
       return;
     }
     if (pickupChoice === 'scheduled') {
-      if (pickupAtDate.getTime() < Date.now() - 60_000) {
-        appAlert('Pickup time', 'Choose a pickup time in the future.');
+      const min = Date.now() + MIN_PICKUP_LEAD_MS;
+      if (pickupAtDate.getTime() < min) {
+        appAlert('Pickup time', 'Please choose another time, approx 2 hours later from now.');
         return;
       }
     }
@@ -413,9 +415,12 @@ export default function QueueScreen({ route, navigation }) {
       );
       return;
     }
-    if (pickupChoice === 'scheduled' && pickupAtDate.getTime() < Date.now() - 60_000) {
-      appAlert('Pickup time', 'Choose a pickup time in the future.');
-      return;
+    if (pickupChoice === 'scheduled') {
+      const min = Date.now() + MIN_PICKUP_LEAD_MS;
+      if (pickupAtDate.getTime() < min) {
+        appAlert('Pickup time', 'Please choose another time, approx 2 hours later from now.');
+        return;
+      }
     }
     const effectiveShopId = shopId != null ? shopId : selectedQueue?.shopId;
     if (!effectiveShopId) {

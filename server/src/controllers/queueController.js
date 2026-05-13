@@ -232,6 +232,9 @@ function parsePickupAt(raw) {
   if (raw === undefined || raw === null || raw === '') return null;
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return null;
+  // Customers can schedule pickup, but not too soon (avoid immediate/invalid scheduling).
+  const min = Date.now() + 2 * 60 * 60 * 1000; // 2 hours
+  if (d.getTime() < min) return null;
   return d;
 }
 
