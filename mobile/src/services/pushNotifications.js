@@ -10,18 +10,27 @@ async function ensureAndroidChannel() {
   if (Platform.OS !== 'android') return;
   await notifee.createChannel({
     id: 'default',
-    name: 'Default',
+    name: 'Queue notifications',
     importance: AndroidImportance.HIGH,
+    sound: 'default',
   });
 }
 
-export async function registerPushToken() {
-  // iOS: ask permission (Android 13+ handled by Notifee permission prompt below if needed).
+/** Android 13+ requires runtime POST_NOTIFICATIONS permission. */
+async function ensureNotificationPermission() {
+  await ensureAndroidChannel();
+  if (Platform.OS === 'android') {
+    await notifee.requestPermission();
+  }
   try {
     await messaging().requestPermission();
   } catch {
     // Permission denied; don't block app.
   }
+}
+
+export async function registerPushToken() {
+  await ensureNotificationPermission();
 
   let token;
   try {
@@ -31,15 +40,21 @@ export async function registerPushToken() {
   }
   if (!token) return;
 
-  // Avoid spamming API on every app open.
-  const lastSent = await AsyncStorage.getItem(TOKEN_SENT_KEY);
-  if (lastSent === token) return;
-
-  await client.post('/notifications/token', {
-    token,
-    platform: Platform.OS,
-  });
-  await AsyncStorage.setItem(TOKEN_SENT_KEY, token);
+  // Always sync token with server (same device, different user after logout/login).
+  try {
+    await client.post('/notifications/token', {
+      token,
+      platform: Platform.OS,
+    });
+    await AsyncStorage.setItem(TOKEN_SENT_KEY, token);
+  } catch {
+    // Don't cache as sent if API failed — retry on next foreground.
+    try {
+      await AsyncStorage.removeItem(TOKEN_SENT_KEY);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export async function unregisterPushToken() {
@@ -58,7 +73,8 @@ export async function unregisterPushToken() {
 }
 
 export function initPushListeners() {
-  // Foreground notifications
+  ensureAndroidChannel().catch(() => {});
+
   const unsubOnMessage = messaging().onMessage(async (remoteMessage) => {
     await ensureAndroidChannel();
     const title = remoteMessage?.notification?.title || 'QueueKart';
@@ -66,12 +82,14 @@ export function initPushListeners() {
     await notifee.displayNotification({
       title,
       body,
-      android: { channelId: 'default' },
+      android: {
+        channelId: 'default',
+        pressAction: { id: 'default' },
+      },
       data: remoteMessage?.data,
     });
   });
 
-  // Token refresh
   const unsubOnTokenRefresh = messaging().onTokenRefresh(async (t) => {
     try {
       await client.post('/notifications/token', {
@@ -84,7 +102,6 @@ export function initPushListeners() {
     }
   });
 
-  // When returning to foreground, re-register token (helps after reinstall / permission changes).
   const onAppState = async (state) => {
     if (state === 'active') {
       try {
@@ -103,4 +120,3 @@ export function initPushListeners() {
     subAppState.remove();
   };
 }
-

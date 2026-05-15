@@ -12,6 +12,15 @@ router.get('/me/history', auth(true), queueController.getMyQueueHistory);
 
 router.get('/:shopId/me', auth(true), queueController.getMyStatus);
 
+router.get('/:shopId/skip-options', auth(true), queueController.getSkipOptions);
+
+router.post(
+  '/:shopId/skip',
+  auth(true),
+  [body('targetPosition').isInt({ min: 1 })],
+  queueController.skipPosition
+);
+
 router.post(
   '/:shopId/join',
   auth(true),

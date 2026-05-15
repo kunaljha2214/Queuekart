@@ -31,7 +31,9 @@ function loadEnv() {
       process.env.QUEUE_PRIORITY_WAITING_THRESHOLD || '5',
       10
     ),
-    /** ₹25 skip fee in paise */
+    /** ₹ per row skipped (default ₹6 → 600 paise) */
+    queueSkipPricePaise: parseInt(process.env.QUEUE_SKIP_PRICE_PAISE || '600', 10),
+    /** @deprecated fixed ₹25 skip — use queueSkipPricePaise */
     queuePriorityPricePaise: parseInt(process.env.QUEUE_PRIORITY_PRICE_PAISE || '2500', 10),
     razorpayKeyId: process.env.RAZORPAY_KEY_ID,
     razorpayKeySecret: process.env.RAZORPAY_KEY_SECRET,

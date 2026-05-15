@@ -4,10 +4,18 @@ const { Router } = require('express');
 const { body } = require('express-validator');
 const Razorpay = require('razorpay');
 const Shop = require('../models/Shop');
+const Queue = require('../models/Queue');
 const { auth } = require('../middleware/auth');
 const { requireRole } = require('../middleware/role');
 const { loadEnv } = require('../config/env');
 const { validationResult } = require('express-validator');
+const {
+  getActiveOrdered,
+  getEntryPosition,
+  isTargetPositionLocked,
+  computeSkipPricePaise,
+  getSkipPricePerRowPaise,
+} = require('../utils/queueSkip');
 
 const router = Router();
 const env = loadEnv();
@@ -56,7 +64,6 @@ router.post(
       const rzp = new Razorpay({ key_id: env.razorpayKeyId, key_secret: env.razorpayKeySecret });
       const amountPaise = 35000; // ₹350
 
-      // Razorpay receipt must be <= 40 chars.
       const shortShop = String(shopId).slice(-8);
       const shortTs = String(Date.now()).slice(-8);
       const receipt = `sub_${shortShop}_${shortTs}`;
@@ -87,16 +94,19 @@ router.post(
       console.error('Razorpay order error:', e?.message || e);
       const status = e?.statusCode || 500;
       const msg = e?.error?.description || e?.error?.code || e?.message || 'Payment order failed';
-      return       res.status(status).json({ message: msg });
+      return res.status(status).json({ message: msg });
     }
   }
 );
 
-/** Customer: ₹25 Razorpay order to skip ahead to 2nd place (only valid when queue is long; verified on join). */
+/** Customer: pay (rows skipped × ₹6) to move to a target queue number. */
 router.post(
   '/razorpay/queue-priority-order',
   auth(true),
-  [body('shopId').notEmpty().isMongoId()],
+  [
+    body('shopId').notEmpty().isMongoId(),
+    body('targetPosition').isInt({ min: 1 }),
+  ],
   async (req, res, next) => {
     try {
       const errors = validationResult(req);
@@ -106,26 +116,62 @@ router.post(
       if (!requireRazorpayConfigured(res)) return;
 
       const cfg = loadEnv();
-      const amountPaise =
-        Number.isFinite(cfg.queuePriorityPricePaise) && cfg.queuePriorityPricePaise > 0
-          ? cfg.queuePriorityPricePaise
-          : 2500;
       const { shopId } = req.body;
+      const targetPosition = parseInt(req.body.targetPosition, 10);
       const shop = await Shop.findOne({ _id: shopId, isActive: true });
       if (!shop) {
         return res.status(404).json({ message: 'Shop not found or inactive' });
       }
 
+      const queue = await Queue.findOne({ shop: shopId });
+      const ordered = getActiveOrdered(queue || { entries: [] });
+
+      const entry = (queue?.entries || []).find(
+        (e) =>
+          e.user &&
+          e.user.toString() === req.user._id.toString() &&
+          (e.status === 'waiting' || e.status === 'serving')
+      );
+
+      let currentPosition;
+      let exceptEntryId = null;
+      if (entry) {
+        currentPosition = getEntryPosition(ordered, entry._id);
+        exceptEntryId = entry._id;
+      } else {
+        currentPosition = ordered.length + 1;
+      }
+
+      if (targetPosition >= currentPosition) {
+        return res.status(400).json({
+          message: 'Choose a queue number lower than your current (or end-of-line) position',
+        });
+      }
+      if (isTargetPositionLocked(ordered, targetPosition, exceptEntryId)) {
+        return res.status(409).json({
+          message: `Queue number ${targetPosition} is reserved by another customer who paid to skip`,
+        });
+      }
+
+      const rowsSkipped = currentPosition - targetPosition;
+      const amountPaise = computeSkipPricePaise(currentPosition, targetPosition);
+      if (amountPaise <= 0) {
+        return res.status(400).json({ message: 'Invalid skip amount' });
+      }
+
       const rzp = new Razorpay({ key_id: cfg.razorpayKeyId, key_secret: cfg.razorpayKeySecret });
-      const receipt = `qp_${String(shopId).slice(-8)}_${String(Date.now()).slice(-8)}`;
+      const receipt = `qs_${String(shopId).slice(-8)}_${String(Date.now()).slice(-8)}`;
       const order = await rzp.orders.create({
         amount: amountPaise,
         currency: 'INR',
         receipt,
         notes: {
-          purpose: 'queue_priority_second',
+          purpose: 'queue_skip',
           shopId: String(shopId),
           userId: String(req.user._id),
+          targetPosition: String(targetPosition),
+          currentPosition: String(currentPosition),
+          rowsSkipped: String(rowsSkipped),
         },
       });
 
@@ -136,9 +182,14 @@ router.post(
         orderId: order.id,
         shopId: String(shop._id),
         shopName: shop.name,
+        targetPosition,
+        currentPosition,
+        rowsSkipped,
+        pricePerRowRupees: getSkipPricePerRowPaise() / 100,
+        amountRupees: amountPaise / 100,
       });
     } catch (e) {
-      console.error('Queue priority Razorpay order error:', e?.message || e);
+      console.error('Queue skip Razorpay order error:', e?.message || e);
       const status = e?.statusCode || 500;
       const msg = e?.error?.description || e?.error?.code || e?.message || 'Payment order failed';
       return res.status(status).json({ message: msg });
@@ -183,7 +234,6 @@ router.post(
         return res.status(400).json({ message: 'Invalid payment signature' });
       }
 
-      // Manual monthly payment: extend by 30 days from max(now, paidUntil).
       const now = new Date();
       const nextDue = shop?.subscription?.nextDueAt ? new Date(shop.subscription.nextDueAt) : null;
       const base = nextDue && nextDue > now ? nextDue : now;
@@ -198,8 +248,6 @@ router.post(
       shop.subscription.lastPaymentStatus = 'paid';
       shop.subscription.pendingPaymentLinkId = null;
       shop.subscription.pendingPaymentLinkUrl = null;
-
-      // Keep legacy field updated for old UI/queries.
       shop.subscriptionPaidUntil = newNextDueAt;
       await shop.save();
 
@@ -214,10 +262,6 @@ router.post(
   }
 );
 
-/**
- * Optional: Razorpay webhook (server-to-server).
- * Configure in Razorpay dashboard: URL = <SERVER>/api/payments/razorpay/webhook
- */
 router.post(
   '/razorpay/webhook',
   express.raw({ type: 'application/json' }),
@@ -238,7 +282,6 @@ router.post(
         {};
       const shopId = notes?.shopId;
 
-      // We only act on successful payment capture.
       if (event === 'payment.captured' && shopId) {
         const shop = await Shop.findById(shopId);
         if (shop) {
@@ -267,4 +310,3 @@ router.post(
 );
 
 module.exports = router;
-

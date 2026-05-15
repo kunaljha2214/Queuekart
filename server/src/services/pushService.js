@@ -37,23 +37,47 @@ async function cleanupInvalidTokens(userId, invalidTokens) {
   );
 }
 
+/** FCM data values must be strings. */
+function normalizeData(data) {
+  if (!data || typeof data !== 'object') return undefined;
+  const out = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined || value === null) continue;
+    out[String(key)] = String(value);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 /**
  * Send a push notification to all known tokens for a user.
  * Payload uses the "notification" field for system tray + "data" for app handling.
  */
 async function sendToUser(userId, payload) {
   initFirebaseOnce();
-  if (!isFirebaseReady()) return { ok: false, skipped: true, reason: 'firebase_not_configured' };
+  if (!isFirebaseReady()) {
+    console.warn('[FCM] skipped: firebase_not_configured');
+    return { ok: false, skipped: true, reason: 'firebase_not_configured' };
+  }
 
   const user = await User.findById(userId).lean();
   const tokens = Array.isArray(user?.fcmTokens) ? user.fcmTokens.map((t) => t.token).filter(Boolean) : [];
-  if (!tokens.length) return { ok: false, skipped: true, reason: 'no_tokens' };
+  if (!tokens.length) {
+    return { ok: false, skipped: true, reason: 'no_tokens' };
+  }
 
   const message = {
     tokens,
     notification: payload?.notification || undefined,
-    data: payload?.data || undefined,
-    android: payload?.android || undefined,
+    data: normalizeData(payload?.data),
+    android: {
+      priority: 'high',
+      notification: {
+        channelId: 'default',
+        priority: 'high',
+        defaultSound: true,
+      },
+      ...(payload?.android || {}),
+    },
     apns: payload?.apns || undefined,
   };
 

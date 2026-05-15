@@ -77,6 +77,7 @@ export function AuthProvider({ children }) {
     setToken(data.token);
     setUser(data.user);
     connectSocket();
+    registerPushToken().catch(() => {});
     return data;
   }, []);
 

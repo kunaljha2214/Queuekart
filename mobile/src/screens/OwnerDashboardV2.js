@@ -889,8 +889,10 @@ export default function OwnerDashboardV2({ navigation }) {
         const canRemove = status === 'waiting' || status === 'serving';
         const groceryList = String(entry.groceryList || '').trim();
         const pickupExtra =
-          entry.joinKind === 'priority_second'
-            ? ' · Priority'
+          entry.joinKind === 'priority_skip' || entry.joinKind === 'priority_second'
+            ? entry.lockedSlot
+              ? ' · Paid skip (locked)'
+              : ' · Paid skip'
             : entry.pickupAt && !Number.isNaN(new Date(entry.pickupAt).getTime())
               ? ` · Pickup ${new Date(entry.pickupAt).toLocaleString()}`
               : '';

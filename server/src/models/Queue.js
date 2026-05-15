@@ -20,12 +20,16 @@ const queueEntrySchema = new mongoose.Schema(
     groceryList: { type: String, trim: true, default: '' },
     /** Customer preferred pickup time (optional; null = flexible / queue order) */
     pickupAt: { type: Date, default: null },
-    /** How the customer joined: end of line vs paid skip to 2nd */
+    /** How the customer joined: end of line vs paid skip ahead */
     joinKind: {
       type: String,
-      enum: ['standard', 'priority_second'],
+      enum: ['standard', 'priority_second', 'priority_skip'],
       default: 'standard',
     },
+    /** Paid skip: this queue row is reserved for this customer until they leave or are served. */
+    lockedSlot: { type: Boolean, default: false },
+    /** Rows skipped when paying to move up (audit / display). */
+    skipRowsPaid: { type: Number, min: 0, default: 0 },
     /** Prevent duplicate "turn soon" pushes */
     turnSoonNotifiedAt: { type: Date, default: null },
   },
