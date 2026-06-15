@@ -4,6 +4,7 @@ const User = require('../models/User');
 const PendingRegistration = require('../models/PendingRegistration');
 const { signToken } = require('../utils/token');
 const { sendOtpEmail } = require('../services/emailService');
+const { isValidShopSubCategory } = require('../constants/shopSubCategories');
 
 function authPayload(user) {
   const token = signToken(user._id, user.role);
@@ -15,6 +16,7 @@ function authPayload(user) {
       name: user.name,
       role: user.role,
       phone: user.phone || '',
+      shopSubCategory: user.shopSubCategory || null,
     },
   };
 }
@@ -46,6 +48,14 @@ async function requestRegisterOtp(req, res, next) {
     const name = req.body.name.trim();
     const role = req.body.role === 'owner' ? 'owner' : 'customer';
     const phone = String(req.body.phone || '').trim();
+    const shopSubCategory =
+      role === 'owner' && isValidShopSubCategory(req.body.shopSubCategory)
+        ? req.body.shopSubCategory
+        : null;
+
+    if (role === 'owner' && !shopSubCategory) {
+      return res.status(400).json({ message: 'Shop subcategory is required for shop owners' });
+    }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
@@ -72,6 +82,7 @@ async function requestRegisterOtp(req, res, next) {
         name,
         phone,
         role,
+        shopSubCategory,
         otpHash,
         otpExpiresAt: new Date(Date.now() + 5 * 60 * 1000),
       },
@@ -138,6 +149,7 @@ async function verifyRegisterOtp(req, res, next) {
       name: pending.name,
       phone: String(pending.phone || '').trim(),
       role: pending.role,
+      shopSubCategory: pending.shopSubCategory || null,
     });
 
     await PendingRegistration.deleteOne({ email });
@@ -247,6 +259,7 @@ async function me(req, res, next) {
         name: req.user.name,
         role: req.user.role,
         phone: req.user.phone || '',
+        shopSubCategory: req.user.shopSubCategory || null,
       },
     });
   } catch (e) {

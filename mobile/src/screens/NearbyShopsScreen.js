@@ -20,6 +20,7 @@ import AdMobBanner from '../components/AdMobBanner';
 import { PLACEMENT_NEARBY_SHOPS_HEADER } from '../constants/adPlacements';
 import Feather from 'react-native-vector-icons/Feather';
 import { appAlert } from '../utils/appAlert';
+import { SHOP_SUB_CATEGORIES } from '../constants/shopSubCategories';
 
 async function ensureLocationPermission() {
   if (Platform.OS !== 'android') {
@@ -44,6 +45,11 @@ export default function NearbyShopsScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [lastError, setLastError] = useState('');
   const [sortMode, setSortMode] = useState('closest'); // 'closest' | 'leastQueue'
+
+  const subCategoryLabel = useMemo(() => {
+    const map = Object.fromEntries(SHOP_SUB_CATEGORIES.map((c) => [c.id, c.label]));
+    return (id) => map[id] || null;
+  }, []);
 
   const colors = useMemo(() => {
     if (isDark) {
@@ -249,34 +255,6 @@ export default function NearbyShopsScreen({ navigation }) {
     [colors]
   );
 
-  const LocationChip = useCallback(
-    ({ onPress }) => (
-      <TouchableOpacity
-        onPress={onPress}
-        activeOpacity={0.9}
-        style={[
-          styles.locChip,
-          { borderColor: colors.border, backgroundColor: colors.surface },
-        ]}
-      >
-        {refreshing ? (
-          <ActivityIndicator size="small" color={colors.primary} />
-        ) : (
-          <Feather name="map-pin" size={18} color={colors.primary} />
-        )}
-        <View style={{ marginLeft: 8 }}>
-          <Text style={[styles.locChipText, { color: colors.text }]}>Current location</Text>
-          {coords ? (
-            <Text style={[styles.locChipSub, { color: colors.subtle }]}>
-              {coords.latitude.toFixed(3)}, {coords.longitude.toFixed(3)}
-            </Text>
-          ) : null}
-        </View>
-      </TouchableOpacity>
-    ),
-    [colors, refreshing, coords]
-  );
-
   const listHeader = useMemo(() => {
     return (
       <View style={styles.headerWrap}>
@@ -313,12 +291,22 @@ export default function NearbyShopsScreen({ navigation }) {
         </View>
 
         <View style={styles.chipRow}>
-          <Chip label="Closest" active={sortMode === 'closest'} onPress={() => setSortMode('closest')} />
+          <Chip
+            label="Closest"
+            active={listMode === 'nearby' && sortMode === 'closest'}
+            onPress={() => {
+              setListMode('nearby');
+              setSortMode('closest');
+            }}
+          />
           <View style={{ width: 8 }} />
           <Chip
             label="Least queue"
-            active={sortMode === 'leastQueue'}
-            onPress={() => setSortMode('leastQueue')}
+            active={listMode === 'nearby' && sortMode === 'leastQueue'}
+            onPress={() => {
+              setListMode('nearby');
+              setSortMode('leastQueue');
+            }}
           />
           <View style={{ width: 8 }} />
           <Chip
@@ -326,8 +314,6 @@ export default function NearbyShopsScreen({ navigation }) {
             active={listMode === 'all'}
             onPress={() => setListMode((m) => (m === 'all' ? 'nearby' : 'all'))}
           />
-          <View style={{ width: 8 }} />
-          <LocationChip onPress={() => refreshFromCurrentLocation({ mode: 'refresh' })} />
         </View>
 
         {listMode === 'all' && catalogLoading ? (
@@ -340,7 +326,7 @@ export default function NearbyShopsScreen({ navigation }) {
         <AdMobBanner placementKey={PLACEMENT_NEARBY_SHOPS_HEADER} />
       </View>
     );
-  }, [colors, query, listMode, catalogLoading, refreshFromCurrentLocation, sortMode, Chip, LocationChip]);
+  }, [colors, query, listMode, catalogLoading, sortMode, Chip, isDark, toggleTheme]);
 
   const emptyComponent = useMemo(() => {
     if (listMode === 'all' && catalogLoading) {
@@ -508,6 +494,11 @@ export default function NearbyShopsScreen({ navigation }) {
                 <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
                   {item.name}
                 </Text>
+                {item.subCategory ? (
+                  <Text style={[styles.cardCategory, { color: colors.primary }]}>
+                    {subCategoryLabel(item.subCategory)}
+                  </Text>
+                ) : null}
                 {item.address ? (
                   <Text style={[styles.cardSub, { color: colors.subtle }]} numberOfLines={1}>
                     {item.address}
@@ -686,6 +677,7 @@ const styles = StyleSheet.create({
   cardTopRow: { flexDirection: 'row', alignItems: 'flex-start' },
   leftTitleCol: { minHeight: 34.5, justifyContent: 'flex-start' },
   cardTitle: { fontSize: 18, fontWeight: '900', lineHeight: 18, marginBottom: 0 },
+  cardCategory: { marginTop: 4, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
   cardSub: { marginTop: 6, fontSize: 13, fontWeight: '600', lineHeight: 16.5 },
   cardSubPlaceholder: { height: 16.5 },
   cardDesc: { marginTop: 8, fontSize: 14, lineHeight: 20 },

@@ -16,6 +16,11 @@ const {
   computeSkipPricePaise,
   getSkipPricePerRowPaise,
 } = require('../utils/queueSkip');
+const SkipReservation = require('../models/SkipReservation');
+const {
+  reserveSkipTarget,
+  releaseSkipTarget,
+} = require('../services/skipReservationService');
 
 const router = Router();
 const env = loadEnv();
@@ -161,19 +166,41 @@ router.post(
 
       const rzp = new Razorpay({ key_id: cfg.razorpayKeyId, key_secret: cfg.razorpayKeySecret });
       const receipt = `qs_${String(shopId).slice(-8)}_${String(Date.now()).slice(-8)}`;
-      const order = await rzp.orders.create({
-        amount: amountPaise,
-        currency: 'INR',
-        receipt,
-        notes: {
-          purpose: 'queue_skip',
-          shopId: String(shopId),
-          userId: String(req.user._id),
-          targetPosition: String(targetPosition),
-          currentPosition: String(currentPosition),
-          rowsSkipped: String(rowsSkipped),
-        },
+
+      const hold = await reserveSkipTarget({
+        shopId,
+        targetPosition,
+        userId: req.user._id,
+        razorpayOrderId: '',
       });
+      if (!hold.ok) {
+        return res.status(hold.status || 409).json({ message: hold.message });
+      }
+
+      let order;
+      try {
+        order = await rzp.orders.create({
+          amount: amountPaise,
+          currency: 'INR',
+          receipt,
+          notes: {
+            purpose: 'queue_skip',
+            shopId: String(shopId),
+            userId: String(req.user._id),
+            targetPosition: String(targetPosition),
+            currentPosition: String(currentPosition),
+            rowsSkipped: String(rowsSkipped),
+          },
+        });
+      } catch (orderErr) {
+        await releaseSkipTarget({ shopId, targetPosition, userId: req.user._id });
+        throw orderErr;
+      }
+
+      await SkipReservation.updateOne(
+        { shop: shopId, targetPosition, userId: req.user._id },
+        { $set: { razorpayOrderId: order.id } }
+      );
 
       res.json({
         keyId: cfg.razorpayKeyId,

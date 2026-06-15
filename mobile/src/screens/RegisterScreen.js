@@ -17,6 +17,7 @@ import { orderlyFlow } from '../theme/orderlyFlow';
 import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
 import Feather from 'react-native-vector-icons/Feather';
 import { appAlert } from '../utils/appAlert';
+import { SHOP_SUB_CATEGORIES } from '../constants/shopSubCategories';
 
 const { colors, radius, spacing, type } = orderlyFlow;
 const shopLogo = require('../assets/logo-shop.png');
@@ -68,6 +69,7 @@ export default function RegisterScreen({ navigation }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState('customer');
+  const [shopSubCategory, setShopSubCategory] = useState(null);
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -99,6 +101,10 @@ export default function RegisterScreen({ navigation }) {
       );
       return;
     }
+    if (role === 'owner' && !shopSubCategory) {
+      appAlert('Select category', 'Choose a shop category (Grocery or Saloon).');
+      return;
+    }
     setLoading(true);
     try {
       const data = await requestRegisterOtp({
@@ -107,6 +113,7 @@ export default function RegisterScreen({ navigation }) {
         phone: normalizedPhone,
         password: normalizedPassword,
         role,
+        shopSubCategory: role === 'owner' ? shopSubCategory : null,
       });
       setOtpSent(true);
       setResendSeconds(30);
@@ -176,7 +183,10 @@ export default function RegisterScreen({ navigation }) {
                 <TouchableOpacity
                   key={r}
                   style={[styles.roleChip, role === r && styles.roleChipActive]}
-                  onPress={() => setRole(r)}
+                  onPress={() => {
+                    setRole(r);
+                    if (r !== 'owner') setShopSubCategory(null);
+                  }}
                   activeOpacity={0.88}
                 >
                   <Text
@@ -187,6 +197,34 @@ export default function RegisterScreen({ navigation }) {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {role === 'owner' ? (
+              <>
+                <Text style={styles.label}>Shop category</Text>
+                <View style={styles.roleRow}>
+                  {SHOP_SUB_CATEGORIES.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[
+                        styles.roleChip,
+                        shopSubCategory === item.id && styles.roleChipActive,
+                      ]}
+                      onPress={() => setShopSubCategory(item.id)}
+                      activeOpacity={0.88}
+                    >
+                      <Text
+                        style={[
+                          styles.roleChipText,
+                          shopSubCategory === item.id && styles.roleChipTextActive,
+                        ]}
+                      >
+                        {item.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            ) : null}
 
             <Text style={styles.label}>Full name</Text>
             <TextInput

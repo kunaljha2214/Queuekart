@@ -18,6 +18,12 @@ const userSchema = new mongoose.Schema(
       enum: ['owner', 'customer'],
       default: 'customer',
     },
+    /** Set during owner registration (grocery, saloon, …). */
+    shopSubCategory: {
+      type: String,
+      enum: ['grocery', 'saloon'],
+      default: null,
+    },
     otpLoginHash: { type: String, select: false, default: null },
     otpLoginExpiresAt: { type: Date, select: false, default: null },
     fcmTokens: [

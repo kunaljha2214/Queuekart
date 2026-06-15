@@ -9,7 +9,7 @@ import React, {
 import { client, setStoredToken, TOKEN_KEY } from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { connectSocket, disconnectSocket } from '../services/socket';
-import { registerPushToken, unregisterPushToken } from '../services/pushNotifications';
+import { unregisterPushToken } from '../services/pushNotifications';
 
 const AuthContext = createContext(null);
 
@@ -32,7 +32,6 @@ export function AuthProvider({ children }) {
       });
       setUser(data.user);
       connectSocket();
-      registerPushToken().catch(() => {});
     } catch {
       await setStoredToken(null);
       setUser(null);
@@ -52,7 +51,6 @@ export function AuthProvider({ children }) {
     setToken(data.token);
     setUser(data.user);
     connectSocket();
-    registerPushToken().catch(() => {});
     return data;
   }, []);
 
@@ -67,7 +65,6 @@ export function AuthProvider({ children }) {
     setToken(data.token);
     setUser(data.user);
     connectSocket();
-    registerPushToken().catch(() => {});
     return data;
   }, []);
 
@@ -77,7 +74,6 @@ export function AuthProvider({ children }) {
     setToken(data.token);
     setUser(data.user);
     connectSocket();
-    registerPushToken().catch(() => {});
     return data;
   }, []);
 
@@ -92,7 +88,6 @@ export function AuthProvider({ children }) {
     setToken(data.token);
     setUser(data.user);
     connectSocket();
-    registerPushToken().catch(() => {});
     return data;
   }, []);
 

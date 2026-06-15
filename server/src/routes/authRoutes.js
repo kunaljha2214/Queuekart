@@ -2,6 +2,7 @@ const { Router } = require('express');
 const { body } = require('express-validator');
 const authController = require('../controllers/authController');
 const { auth } = require('../middleware/auth');
+const { SHOP_SUB_CATEGORIES } = require('../constants/shopSubCategories');
 
 const router = Router();
 
@@ -18,6 +19,10 @@ router.post(
       .matches(/^[0-9+\-\s()]{7,20}$/)
       .withMessage('Invalid phone number'),
     body('role').optional().isIn(['owner', 'customer']),
+    body('shopSubCategory')
+      .optional({ values: 'null' })
+      .isIn(SHOP_SUB_CATEGORIES)
+      .withMessage('Invalid shop subcategory'),
   ],
   authController.requestRegisterOtp
 );

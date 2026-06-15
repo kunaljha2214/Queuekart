@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
-  PermissionsAndroid,
   Platform,
   ScrollView,
   StyleSheet,
@@ -14,13 +13,13 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import Geolocation from 'react-native-geolocation-service';
 import { useAuth } from '../context/AuthContext';
 import { useAds } from '../context/AdsContext';
 import { useTheme } from '../context/ThemeContext';
 import { client } from '../services/api';
 import { subscribeShopQueue } from '../services/socket';
 import ThemeToggleSwitch from '../components/ThemeToggleSwitch';
+import SaloonServicesEditor from '../components/SaloonServicesEditor';
 import Feather from 'react-native-vector-icons/Feather';
 import {
   PLACEMENT_OWNER_REMOVE_ENTRY_INTERSTITIAL,
@@ -28,9 +27,10 @@ import {
 } from '../constants/adPlacements';
 import { requestInterstitialShow } from '../utils/showInterstitialAd';
 import { appAlert } from '../utils/appAlert';
+import { fetchDeviceCoordinates } from '../utils/deviceLocation';
 
 export default function OwnerDashboardV2({ navigation }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { getInterstitialUnitId } = useAds();
   const { isDark, toggleTheme } = useTheme();
   const [shops, setShops] = useState([]);
@@ -64,6 +64,8 @@ export default function OwnerDashboardV2({ navigation }) {
   const [creatingShop, setCreatingShop] = useState(false);
   const [locatingShop, setLocatingShop] = useState(false);
   const [shopLocationError, setShopLocationError] = useState('');
+  const [newSaloonServices, setNewSaloonServices] = useState([]);
+  const [editSaloonServices, setEditSaloonServices] = useState([]);
   const [payingSub, setPayingSub] = useState(false);
   const [togglingShopOpen, setTogglingShopOpen] = useState(false);
 
@@ -108,6 +110,9 @@ export default function OwnerDashboardV2({ navigation }) {
     () => shops.find((s) => s._id === shopId),
     [shops, shopId]
   );
+
+  const isSaloonOwner = user?.shopSubCategory === 'saloon';
+  const isSaloonShop = activeShop?.subCategory === 'saloon';
 
   /** First renewal / trial deadline: subscription.nextDueAt → legacy paid-until → createdAt + 1 day */
   const nextPaymentDueDate = useMemo(() => {
@@ -231,44 +236,18 @@ export default function OwnerDashboardV2({ navigation }) {
     }
   }
 
-  async function ensureLocationPermission() {
-    if (Platform.OS !== 'android') {
-      const status = await Geolocation.requestAuthorization('whenInUse');
-      return status === 'granted';
-    }
-    const fine = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-    );
-    return fine === PermissionsAndroid.RESULTS.GRANTED;
-  }
-
   async function fillShopLocationFromDevice() {
     setShopLocationError('');
     setLocatingShop(true);
     try {
-      const ok = await ensureLocationPermission();
-      if (!ok) {
-        setShopLocationError('Location permission denied.');
-        return;
-      }
-      await new Promise((resolve, reject) => {
-        Geolocation.getCurrentPosition(
-          (pos) => resolve(pos),
-          (err) => reject(err),
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
-        );
-      }).then((pos) => {
-        const latitude = pos?.coords?.latitude;
-        const longitude = pos?.coords?.longitude;
-        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-          setNewShopLat(String(latitude));
-          setNewShopLng(String(longitude));
-        } else {
-          setShopLocationError('Could not read device location.');
-        }
-      });
+      const { latitude, longitude } = await fetchDeviceCoordinates();
+      setNewShopLat(String(latitude));
+      setNewShopLng(String(longitude));
     } catch (e) {
-      setShopLocationError(e?.message || 'Could not get location.');
+      setShopLocationError(
+        e?.message ||
+          'Could not detect location. Enter latitude and longitude manually, or tap Retry.'
+      );
     } finally {
       setLocatingShop(false);
     }
@@ -345,12 +324,14 @@ export default function OwnerDashboardV2({ navigation }) {
     setEditName(activeShop.name || '');
     setEditAddress(activeShop.address || '');
     setEditDescription(activeShop.description || '');
+    setEditSaloonServices(activeShop.saloonServices || []);
   }, [activeShop]);
 
   function resetEditFields() {
     setEditName(activeShop?.name || '');
     setEditAddress(activeShop?.address || '');
     setEditDescription(activeShop?.description || '');
+    setEditSaloonServices(activeShop?.saloonServices || []);
   }
 
   useEffect(() => {
@@ -527,11 +508,22 @@ export default function OwnerDashboardV2({ navigation }) {
   }
 
   async function saveShopInfo() {
-    await client.patch(`/shops/${shopId}`, {
+    if (isSaloonShop && editSaloonServices.length === 0) {
+      appAlert('Services required', 'Add at least one service for your saloon.');
+      return;
+    }
+    const payload = {
       name: editName.trim(),
       address: editAddress.trim(),
       description: editDescription.trim(),
-    });
+    };
+    if (isSaloonShop) {
+      payload.saloonServices = editSaloonServices;
+    }
+    const { data } = await client.patch(`/shops/${shopId}`, payload);
+    if (data.shop) {
+      setShops((prev) => prev.map((s) => (s._id === shopId ? data.shop : s)));
+    }
     appAlert('Saved', 'Shop details updated.');
   }
 
@@ -549,15 +541,24 @@ export default function OwnerDashboardV2({ navigation }) {
       appAlert('Required', 'Location is required. Please allow location access.');
       return;
     }
+    if (isSaloonOwner && newSaloonServices.length === 0) {
+      appAlert('Services required', 'Add at least one service for your saloon.');
+      return;
+    }
     try {
       setCreatingShop(true);
-      const { data } = await client.post('/shops', {
+      const payload = {
         name,
         address,
         description,
         lat,
         lng,
-      });
+        subCategory: user?.shopSubCategory || undefined,
+      };
+      if (isSaloonOwner) {
+        payload.saloonServices = newSaloonServices;
+      }
+      const { data } = await client.post('/shops', payload);
       const created = data.shop;
       const next = created ? [created, ...shops] : shops;
       setShops(next);
@@ -568,6 +569,7 @@ export default function OwnerDashboardV2({ navigation }) {
       setNewShopDescription('');
       setNewShopLat('');
       setNewShopLng('');
+      setNewSaloonServices([]);
     } catch (e) {
       const msg =
         e.response?.data?.message ||
@@ -582,6 +584,7 @@ export default function OwnerDashboardV2({ navigation }) {
   if (loading) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
   if (!activeShop) {
     const hasLocation = newShopLat.trim() !== '' && newShopLng.trim() !== '';
+    const hasSaloonServices = !isSaloonOwner || newSaloonServices.length > 0;
     return (
       <ScrollView
         style={[styles.page, { backgroundColor: colors.bg }]}
@@ -632,6 +635,13 @@ export default function OwnerDashboardV2({ navigation }) {
             value={newShopDescription}
             onChangeText={setNewShopDescription}
           />
+          {isSaloonOwner ? (
+            <SaloonServicesEditor
+              services={newSaloonServices}
+              onChange={setNewSaloonServices}
+              colors={colors}
+            />
+          ) : null}
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <TextInput
               style={[
@@ -640,9 +650,9 @@ export default function OwnerDashboardV2({ navigation }) {
               ]}
               placeholder="Latitude"
               placeholderTextColor={colors.placeholder}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               value={newShopLat}
-              editable={false}
+              onChangeText={setNewShopLat}
             />
             <TextInput
               style={[
@@ -651,9 +661,9 @@ export default function OwnerDashboardV2({ navigation }) {
               ]}
               placeholder="Longitude"
               placeholderTextColor={colors.placeholder}
-              keyboardType="numeric"
+              keyboardType="decimal-pad"
               value={newShopLng}
-              editable={false}
+              onChangeText={setNewShopLng}
             />
           </View>
           {shopLocationError ? (
@@ -678,10 +688,10 @@ export default function OwnerDashboardV2({ navigation }) {
           <TouchableOpacity
             style={[
               styles.primaryBtn,
-              (creatingShop || locatingShop || !hasLocation) && { opacity: 0.7 },
+              (creatingShop || locatingShop || !hasLocation || !hasSaloonServices) && { opacity: 0.7 },
             ]}
             onPress={createShop}
-            disabled={creatingShop || locatingShop || !hasLocation}
+            disabled={creatingShop || locatingShop || !hasLocation || !hasSaloonServices}
           >
             <Text style={styles.primaryBtnText}>
               {creatingShop ? 'Creating…' : locatingShop ? 'Detecting location…' : 'Add shop'}
@@ -1191,6 +1201,14 @@ export default function OwnerDashboardV2({ navigation }) {
               placeholder="Description"
               placeholderTextColor={colors.placeholder}
             />
+
+            {isSaloonShop ? (
+              <SaloonServicesEditor
+                services={editSaloonServices}
+                onChange={setEditSaloonServices}
+                colors={colors}
+              />
+            ) : null}
 
             <View style={styles.modalActions}>
               <TouchableOpacity

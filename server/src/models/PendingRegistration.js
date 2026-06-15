@@ -17,6 +17,11 @@ const pendingRegistrationSchema = new mongoose.Schema(
       enum: ['owner', 'customer'],
       default: 'customer',
     },
+    shopSubCategory: {
+      type: String,
+      enum: ['grocery', 'saloon'],
+      default: null,
+    },
     otpHash: { type: String, required: true, select: false },
     otpExpiresAt: { type: Date, required: true, select: false },
   },

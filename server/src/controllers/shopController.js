@@ -1,6 +1,8 @@
 const { validationResult } = require('express-validator');
 const Shop = require('../models/Shop');
 const Queue = require('../models/Queue');
+const { isValidShopSubCategory } = require('../constants/shopSubCategories');
+const { normalizeSaloonServices } = require('../constants/saloonServices');
 
 const ONE_DAY_MS = 1 * 24 * 60 * 60 * 1000;
 
@@ -55,13 +57,32 @@ async function create(req, res, next) {
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
-    const { name, description, lng, lat, address } = req.body;
+    const { name, description, lng, lat, address, subCategory, saloonServices } = req.body;
+    const resolvedSubCategory = isValidShopSubCategory(subCategory)
+      ? subCategory
+      : isValidShopSubCategory(req.user.shopSubCategory)
+        ? req.user.shopSubCategory
+        : null;
+
+    if (!resolvedSubCategory) {
+      return res.status(400).json({ message: 'Shop subcategory is required' });
+    }
+
+    const normalizedSaloonServices =
+      resolvedSubCategory === 'saloon' ? normalizeSaloonServices(saloonServices) : [];
+
+    if (resolvedSubCategory === 'saloon' && normalizedSaloonServices.length === 0) {
+      return res.status(400).json({ message: 'At least one saloon service is required' });
+    }
+
     const createdAt = new Date();
     const nextDueAt = new Date(createdAt);
     nextDueAt.setDate(nextDueAt.getDate() + 1); // 1-day grace for first payment
     const shop = await Shop.create({
       name,
       description,
+      subCategory: resolvedSubCategory,
+      saloonServices: normalizedSaloonServices,
       owner: req.user._id,
       address: address || '',
       isOpen: true,
@@ -101,11 +122,13 @@ async function nearby(req, res, next) {
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
     const maxDistance = parseInt(req.query.maxDistance || '5000', 10);
+    const subCategory = String(req.query.subCategory || '').trim();
     if (Number.isNaN(lat) || Number.isNaN(lng)) {
       return res.status(400).json({ message: 'lat and lng query params required' });
     }
     const shops = await Shop.find({
       ...customerListableShopMatch(),
+      ...(isValidShopSubCategory(subCategory) ? { subCategory } : {}),
       location: {
         $near: {
           $geometry: {
@@ -131,9 +154,13 @@ async function nearby(req, res, next) {
 async function listDirectory(req, res, next) {
   try {
     const q = String(req.query.q || '').trim();
+    const subCategory = String(req.query.subCategory || '').trim();
     const filter = { ...customerListableShopMatch() };
     if (q) {
       filter.name = { $regex: escapeRegex(q), $options: 'i' };
+    }
+    if (isValidShopSubCategory(subCategory)) {
+      filter.subCategory = subCategory;
     }
     const shops = await Shop.find(filter)
       .populate('owner', 'name email phone')
@@ -168,12 +195,24 @@ async function update(req, res, next) {
     if (!shop) {
       return res.status(404).json({ message: 'Shop not found' });
     }
-    const { name, description, lng, lat, address, isActive, isOpen } = req.body;
+    const { name, description, lng, lat, address, isActive, isOpen, subCategory, saloonServices } =
+      req.body;
     if (name != null) shop.name = name;
     if (description != null) shop.description = description;
     if (address != null) shop.address = address;
     if (typeof isActive === 'boolean') shop.isActive = isActive;
     if (typeof isOpen === 'boolean') shop.isOpen = isOpen;
+    if (isValidShopSubCategory(subCategory)) shop.subCategory = subCategory;
+    if (saloonServices != null) {
+      if (shop.subCategory !== 'saloon') {
+        return res.status(400).json({ message: 'Services apply only to saloon shops' });
+      }
+      const normalized = normalizeSaloonServices(saloonServices);
+      if (normalized.length === 0) {
+        return res.status(400).json({ message: 'At least one saloon service is required' });
+      }
+      shop.saloonServices = normalized;
+    }
     if (lng != null && lat != null) {
       shop.location = {
         type: 'Point',

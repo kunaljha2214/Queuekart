@@ -32,11 +32,26 @@ function computeSkipPricePaise(currentPosition, targetPosition) {
   return rows * getSkipPricePerRowPaise();
 }
 
-function listSkipTargetOptions(ordered, currentPosition, exceptEntryId = null) {
+function listSkipTargetOptions(
+  ordered,
+  currentPosition,
+  exceptEntryId = null,
+  reservations = [],
+  userId = null
+) {
   const pricePerRow = getSkipPricePerRowPaise();
+  const uid = userId ? String(userId) : null;
   const options = [];
   for (let t = 1; t < currentPosition; t += 1) {
     if (isTargetPositionLocked(ordered, t, exceptEntryId)) continue;
+    if (
+      uid &&
+      reservations.some(
+        (r) => r.targetPosition === t && String(r.userId) !== uid
+      )
+    ) {
+      continue;
+    }
     const rowsSkipped = currentPosition - t;
     options.push({
       targetPosition: t,

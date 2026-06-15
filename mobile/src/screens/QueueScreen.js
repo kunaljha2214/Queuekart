@@ -445,6 +445,17 @@ export default function QueueScreen({ route, navigation }) {
     }
   }
 
+  async function assertSkipTargetAvailable(effectiveShopId, targetPosition) {
+    const { data } = await client.get(`/queues/${effectiveShopId}/skip-options`);
+    const available = (data.options || []).some((o) => o.targetPosition === targetPosition);
+    if (!available) {
+      const err = new Error('spot_taken');
+      err.userMessage =
+        'This queue number is no longer available. Another customer reserved or joined it. Please pick a different number.';
+      throw err;
+    }
+  }
+
   async function payAndSkipToPosition(targetPosition, { mode, groceryList }) {
     const effectiveShopId = shopId != null ? shopId : selectedQueue?.shopId;
     if (!effectiveShopId || !targetPosition) {
@@ -461,10 +472,14 @@ export default function QueueScreen({ route, navigation }) {
     if (joining) return;
     setJoining(true);
     try {
+      await assertSkipTargetAvailable(effectiveShopId, targetPosition);
+
       const { data: ord } = await client.post('/payments/razorpay/queue-priority-order', {
         shopId: effectiveShopId,
         targetPosition,
       });
+
+      await assertSkipTargetAvailable(effectiveShopId, targetPosition);
       const { default: RazorpayCheckout } = await import('react-native-razorpay');
       const rows = ord.rowsSkipped ?? 0;
       const amountRupees = ord.amountRupees ?? ord.amount / 100;
@@ -510,12 +525,19 @@ export default function QueueScreen({ route, navigation }) {
       }
     } catch (e) {
       const msg =
+        e?.userMessage ||
         e?.response?.data?.message ||
         e?.details?.description ||
         e?.description ||
         e?.message ||
         'Payment failed or was cancelled.';
       appAlert(mode === 'join' ? 'Could not join with skip' : 'Could not move up', msg);
+      if (e?.userMessage || e?.response?.status === 409) {
+        loadSkipOptions().then((opts) => {
+          if (mode === 'join' && opts.length) setJoinSkipTarget(opts[0].targetPosition);
+          if (mode === 'move' && opts.length) setSkipTargetPosition(opts[0].targetPosition);
+        });
+      }
     } finally {
       setJoining(false);
     }
@@ -901,22 +923,32 @@ export default function QueueScreen({ route, navigation }) {
       }}
     >
       <View style={styles.modalBackdrop}>
-        <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+        <View style={[styles.modalCard, styles.skipModalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Text style={[styles.modalTitle, { color: colors.text }]}>Move up in queue</Text>
           <Text style={[styles.modalSub, { color: colors.subtle }]}>
-            You are #{displayPosition ?? '—'}. Pay ₹{SKIP_PRICE_PER_ROW_RUPEES} × rows skipped. Locked spots are unavailable.
+            You are #{displayPosition ?? '—'}. Pay ₹{SKIP_PRICE_PER_ROW_RUPEES} per row you skip. Reserved numbers cannot be chosen.
           </Text>
           {skipOptions.length === 0 ? (
-            <Text style={[styles.modalSub, { color: colors.muted }]}>No positions available to skip to right now.</Text>
+            <Text style={[styles.modalSub, { color: colors.muted, marginTop: 12 }]}>
+              No positions available to skip to right now.
+            </Text>
           ) : (
             <>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 12 }}>
+              <Text style={[styles.joinSectionLabel, { color: colors.text, marginTop: 14 }]}>
+                Choose queue number
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.skipChipScrollContent}
+              >
                 {skipOptions.map((opt) => {
                   const active = skipTargetPosition === opt.targetPosition;
                   return (
                     <TouchableOpacity
                       key={opt.targetPosition}
                       onPress={() => setSkipTargetPosition(opt.targetPosition)}
+                      activeOpacity={0.88}
                       style={[
                         styles.skipTargetChip,
                         {
@@ -935,26 +967,44 @@ export default function QueueScreen({ route, navigation }) {
                   );
                 })}
               </ScrollView>
+              {selectedMoveSkipOption ? (
+                <Text style={[styles.skipSummaryLine, { color: colors.muted }]}>
+                  Skip {selectedMoveSkipOption.rowsSkipped} row(s) · total ₹{selectedMoveSkipOption.amountRupees}
+                </Text>
+              ) : null}
+            </>
+          )}
+          <View style={styles.skipModalActions}>
+            {skipOptions.length > 0 ? (
               <TouchableOpacity
                 onPress={confirmMoveUpInQueue}
                 disabled={joining || !skipTargetPosition}
-                style={[styles.modalPrimaryBtn, { backgroundColor: colors.primary, opacity: joining ? 0.7 : 1 }]}
+                activeOpacity={0.88}
+                style={[
+                  styles.skipPayBtn,
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: joining || !skipTargetPosition ? 0.55 : 1,
+                  },
+                ]}
               >
-                <Text style={styles.modalPrimaryText}>
+                <Feather name="zap" size={18} color="#ffffff" style={{ marginRight: 8 }} />
+                <Text style={styles.skipPayBtnText} numberOfLines={2}>
                   {joining
                     ? 'Processing…'
                     : `Pay ₹${selectedMoveSkipOption?.amountRupees ?? '—'} · move to #${skipTargetPosition ?? '—'}`}
                 </Text>
               </TouchableOpacity>
-            </>
-          )}
-          <TouchableOpacity
-            onPress={() => setShowSkipModal(false)}
-            style={[styles.modalBtn, { borderColor: colors.border, marginTop: 12 }]}
-            disabled={joining}
-          >
-            <Text style={[styles.modalBtnText, { color: colors.text }]}>Cancel</Text>
-          </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              onPress={() => setShowSkipModal(false)}
+              style={[styles.skipCancelBtn, { borderColor: colors.border, backgroundColor: colors.bg }]}
+              disabled={joining}
+              activeOpacity={0.88}
+            >
+              <Text style={[styles.modalBtnText, { color: colors.text }]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -1462,12 +1512,43 @@ const styles = StyleSheet.create({
   },
   modalBtnText: { fontSize: 14, fontWeight: '800' },
   modalPrimaryBtn: {
-    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+  },
+  modalPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '900', textAlign: 'center' },
+  skipModalCard: { width: '100%', maxWidth: 400 },
+  skipChipScrollContent: { paddingVertical: 4, paddingRight: 4 },
+  skipSummaryLine: { marginTop: 8, fontSize: 12, fontWeight: '700', textAlign: 'center' },
+  skipModalActions: { marginTop: 16 },
+  skipPayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    minHeight: 48,
+  },
+  skipPayBtnText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'center',
+    flexShrink: 1,
+  },
+  skipCancelBtn: {
+    marginTop: 10,
+    borderWidth: 1,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
   },
-  modalPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '900' },
   joinOptionsCard: { maxHeight: 560 },
   priorityPayRow: {
     flexDirection: 'row',

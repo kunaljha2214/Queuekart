@@ -4,6 +4,18 @@ const shopSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     description: { type: String, default: '' },
+    subCategory: {
+      type: String,
+      enum: ['grocery', 'saloon'],
+      default: null,
+    },
+    /** Saloon shops only: services offered (preset + custom). */
+    saloonServices: [
+      {
+        name: { type: String, required: true, trim: true },
+        isCustom: { type: Boolean, default: false },
+      },
+    ],
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

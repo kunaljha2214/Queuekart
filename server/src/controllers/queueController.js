@@ -14,6 +14,11 @@ const {
   listSkipTargetOptions,
   reorderToTarget,
 } = require('../utils/queueSkip');
+const {
+  listActiveReservations,
+  assertUserMayClaimSkipTarget,
+  releaseSkipTarget,
+} = require('../services/skipReservationService');
 
 function computeWaitMinutes({ orderedActiveEntries, yourIndex, perRealAheadMinutes }) {
   const ahead = orderedActiveEntries.slice(0, Math.max(0, yourIndex));
@@ -363,9 +368,17 @@ async function getSkipOptions(req, res, next) {
         (e.status === 'waiting' || e.status === 'serving')
     );
 
+    const reservations = await listActiveReservations(shop._id);
+
     if (!entry) {
       const projectedPosition = ordered.length + 1;
-      const options = listSkipTargetOptions(ordered, projectedPosition, null);
+      const options = listSkipTargetOptions(
+        ordered,
+        projectedPosition,
+        null,
+        reservations,
+        req.user._id
+      );
       return res.json({
         inQueue: false,
         projectedPosition,
@@ -375,7 +388,13 @@ async function getSkipOptions(req, res, next) {
     }
 
     const currentPosition = getEntryPosition(ordered, entry._id);
-    const options = listSkipTargetOptions(ordered, currentPosition, entry._id);
+    const options = listSkipTargetOptions(
+      ordered,
+      currentPosition,
+      entry._id,
+      reservations,
+      req.user._id
+    );
     return res.json({
       inQueue: true,
       currentPosition,
@@ -426,6 +445,15 @@ async function skipPosition(req, res, next) {
       });
     }
 
+    const claim = await assertUserMayClaimSkipTarget({
+      shopId: shop._id,
+      targetPosition,
+      userId: req.user._id,
+    });
+    if (!claim.ok) {
+      return res.status(claim.status || 409).json({ message: claim.message });
+    }
+
     const expectedAmountPaise = computeSkipPricePaise(currentPosition, targetPosition);
     const v = await verifySkipQueuePayment(req.body, {
       shopId: shop._id,
@@ -438,6 +466,13 @@ async function skipPosition(req, res, next) {
       return res.status(v.status || 400).json({ message: v.message });
     }
 
+    const orderedFresh = getActiveOrdered(queue);
+    if (isTargetPositionLocked(orderedFresh, targetPosition, entry._id)) {
+      return res.status(409).json({
+        message: `Queue number ${targetPosition} was just taken. Please contact support if you were charged.`,
+      });
+    }
+
     reorderToTarget(queue, entry._id, targetPosition);
     entry.lockedSlot = true;
     entry.skipRowsPaid = (Number(entry.skipRowsPaid) || 0) + (currentPosition - targetPosition);
@@ -445,6 +480,11 @@ async function skipPosition(req, res, next) {
     await queue.save();
 
     await recordSkipPayment(req, shop._id, req.body?.razorpay_payment_id);
+    await releaseSkipTarget({
+      shopId: shop._id,
+      targetPosition,
+      userId: req.user._id,
+    });
 
     await queue.populate('entries.user', 'name email phone');
     emitQueueUpdate(io, shop._id.toString(), queue);
@@ -540,6 +580,14 @@ async function join(req, res, next) {
           message: `Queue number ${targetPosition} is reserved by another customer who paid to skip`,
         });
       }
+      const claim = await assertUserMayClaimSkipTarget({
+        shopId: shop._id,
+        targetPosition,
+        userId: req.user._id,
+      });
+      if (!claim.ok) {
+        return res.status(claim.status || 409).json({ message: claim.message });
+      }
       const expectedAmountPaise = computeSkipPricePaise(projectedPosition, targetPosition);
       const v = await verifySkipQueuePayment(req.body, {
         shopId: shop._id,
@@ -574,6 +622,12 @@ async function join(req, res, next) {
     const newEntry = queue.entries[queue.entries.length - 1];
 
     if (wantSkip) {
+      const orderedFresh = getActiveOrdered(queue);
+      if (isTargetPositionLocked(orderedFresh, targetPosition, newEntry._id)) {
+        return res.status(409).json({
+          message: `Queue number ${targetPosition} was just taken. Please contact support if you were charged.`,
+        });
+      }
       reorderToTarget(queue, newEntry._id, targetPosition);
     } else {
       await normalizePositions(queue);
@@ -582,6 +636,11 @@ async function join(req, res, next) {
 
     if (wantSkip) {
       await recordSkipPayment(req, shop._id, req.body?.razorpay_payment_id);
+      await releaseSkipTarget({
+        shopId: shop._id,
+        targetPosition,
+        userId: req.user._id,
+      });
     }
 
     await queue.populate('entries.user', 'name email phone');

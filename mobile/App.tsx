@@ -15,6 +15,7 @@ import { AdsProvider } from './src/context/AdsContext';
 import { AuthProvider } from './src/context/AuthContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import RootNavigator from './src/navigation/RootNavigator';
+import NotificationSetup from './src/components/NotificationSetup';
 import { initPushListeners } from './src/services/pushNotifications';
 import SplashScreen from './src/screens/SplashScreen';
 
@@ -32,6 +33,7 @@ function AppShell() {
   if (!ready || !minElapsed) return <SplashScreen />;
   return (
     <AuthProvider>
+      <NotificationSetup />
       <NavigationContainer>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
         <RootNavigator />
