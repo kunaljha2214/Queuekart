@@ -58,6 +58,7 @@ router.patch(
     body('subCategory').optional().isIn(SHOP_SUB_CATEGORIES),
     body('isActive').optional().isBoolean(),
     body('isOpen').optional().isBoolean(),
+    body('nextOpenAt').optional().isISO8601(),
     body('saloonServices').optional().isArray(),
     body('saloonServices.*.name').optional().trim().notEmpty(),
     body('saloonServices.*.isCustom').optional().isBoolean(),

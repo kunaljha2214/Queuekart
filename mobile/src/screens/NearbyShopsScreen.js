@@ -21,6 +21,7 @@ import { PLACEMENT_NEARBY_SHOPS_HEADER } from '../constants/adPlacements';
 import Feather from 'react-native-vector-icons/Feather';
 import { appAlert } from '../utils/appAlert';
 import { SHOP_SUB_CATEGORIES } from '../constants/shopSubCategories';
+import { formatNextOpenAt, isShopScheduledClosed } from '../utils/shopSchedule';
 
 async function ensureLocationPermission() {
   if (Platform.OS !== 'android') {
@@ -499,6 +500,13 @@ export default function NearbyShopsScreen({ navigation }) {
                     {subCategoryLabel(item.subCategory)}
                   </Text>
                 ) : null}
+                {isShopScheduledClosed(item) ? (
+                  <Text style={[styles.cardStatusClosed, { color: '#f59e0b' }]}>
+                    Closed · Opens {formatNextOpenAt(item.nextOpenAt)}
+                  </Text>
+                ) : (
+                  <Text style={[styles.cardStatusOpen, { color: colors.primary }]}>Open now</Text>
+                )}
                 {item.address ? (
                   <Text style={[styles.cardSub, { color: colors.subtle }]} numberOfLines={1}>
                     {item.address}
@@ -561,7 +569,9 @@ export default function NearbyShopsScreen({ navigation }) {
               <View style={{ width: 12 }} />
 
               <TouchableOpacity
-                onPress={() => openShop(item, { promptGroceryList: true })}
+                onPress={() =>
+                  openShop(item, { promptGroceryList: item.subCategory !== 'saloon' })
+                }
                 activeOpacity={0.9}
                 style={[styles.openBtn, { backgroundColor: colors.primary }]}
               >
@@ -678,6 +688,8 @@ const styles = StyleSheet.create({
   leftTitleCol: { minHeight: 34.5, justifyContent: 'flex-start' },
   cardTitle: { fontSize: 18, fontWeight: '900', lineHeight: 18, marginBottom: 0 },
   cardCategory: { marginTop: 4, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+  cardStatusClosed: { marginTop: 4, fontSize: 12, fontWeight: '700' },
+  cardStatusOpen: { marginTop: 4, fontSize: 12, fontWeight: '700' },
   cardSub: { marginTop: 6, fontSize: 13, fontWeight: '600', lineHeight: 16.5 },
   cardSubPlaceholder: { height: 16.5 },
   cardDesc: { marginTop: 8, fontSize: 14, lineHeight: 20 },

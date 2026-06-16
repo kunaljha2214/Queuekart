@@ -34,8 +34,10 @@ const shopSchema = new mongoose.Schema(
     },
     address: { type: String, default: '' },
     isActive: { type: Boolean, default: true },
-    /** Open = visible to customers (when subscription also allows). Closed = hidden from nearby. */
+    /** Open = serving now. Closed = accepts scheduled queue joins until nextOpenAt. */
     isOpen: { type: Boolean, default: true },
+    /** When the shop will open again (required when isOpen is false). */
+    nextOpenAt: { type: Date, default: null },
     /** Legacy field (kept for backward compatibility) */
     subscriptionPaidUntil: { type: Date, default: null },
     /** Manual monthly subscription (₹350) */

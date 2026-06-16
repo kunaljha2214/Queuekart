@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import {
   ActivityIndicator,
   Linking,
@@ -27,6 +26,15 @@ import {
 import { requestInterstitialShow } from '../utils/showInterstitialAd';
 import { appAlert } from '../utils/appAlert';
 import Feather from 'react-native-vector-icons/Feather';
+import { openAndroidDatePicker } from '../utils/datePicker';
+import {
+  formatNextOpenAt,
+  getMinVisitTime,
+  isShopScheduledClosed,
+} from '../utils/shopSchedule';
+import { isSaloonSlotTaken } from '../utils/saloonSchedule';
+
+const IosDateTimePicker = React.lazy(() => import('../components/IosDateTimePicker'));
 
 /** Display hint; server uses QUEUE_SKIP_PRICE_PAISE (default ₹6 per row). */
 const SKIP_PRICE_PER_ROW_RUPEES = 6;
@@ -64,27 +72,58 @@ export default function QueueScreen({ route, navigation }) {
     d.setMinutes(d.getMinutes() + 45, 0, 0);
     return d;
   });
+
+  const shopScheduledClosed = useMemo(
+    () => isShopScheduledClosed(shopDetails),
+    [shopDetails]
+  );
+
+  const isSaloonShop = shopDetails?.subCategory === 'saloon';
+
+  const minVisitTime = useMemo(
+    () => getMinVisitTime(shopDetails, MIN_PICKUP_LEAD_MS),
+    [shopDetails]
+  );
+
+  const saloonVisitSlotTaken = useMemo(() => {
+    if (!isSaloonShop) return false;
+    if (!shopScheduledClosed && pickupChoice !== 'scheduled') return false;
+    return isSaloonSlotTaken(queue?.entries, pickupAtDate);
+  }, [
+    isSaloonShop,
+    shopScheduledClosed,
+    pickupChoice,
+    queue?.entries,
+    pickupAtDate,
+  ]);
+
+  useEffect(() => {
+    if (!shopScheduledClosed) return;
+    setPickupChoice('scheduled');
+    setPickupAtDate(minVisitTime);
+  }, [shopScheduledClosed, minVisitTime]);
+
   const openPickupPicker = useCallback(() => {
     if (Platform.OS !== 'android') return;
 
     const base = new Date(pickupAtDate);
-    const now = new Date();
+    const minimumDate = minVisitTime;
 
-    DateTimePickerAndroid.open({
+    openAndroidDatePicker({
       value: base,
-      mode: 'date',
-      minimumDate: now,
-      onChange: (_event, selectedDate) => {
-        if (!selectedDate) return;
+      minimumDate,
+      onSelect: (selectedDate) => {
         const withDate = new Date(base);
-        withDate.setFullYear(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+        withDate.setFullYear(
+          selectedDate.getFullYear(),
+          selectedDate.getMonth(),
+          selectedDate.getDate()
+        );
 
-        DateTimePickerAndroid.open({
+        openAndroidDatePicker({
           value: withDate,
           mode: 'time',
-          is24Hour: false,
-          onChange: (__event, selectedTime) => {
-            if (!selectedTime) return;
+          onSelect: (selectedTime) => {
             const next = new Date(withDate);
             next.setHours(selectedTime.getHours(), selectedTime.getMinutes(), 0, 0);
             setPickupAtDate(next);
@@ -92,7 +131,7 @@ export default function QueueScreen({ route, navigation }) {
         });
       },
     });
-  }, [pickupAtDate]);
+  }, [pickupAtDate, minVisitTime]);
 
   const openCall = useCallback(async (phone) => {
     try {
@@ -351,6 +390,15 @@ export default function QueueScreen({ route, navigation }) {
   );
 
   function beginJoin() {
+    if (isSaloonShop) {
+      setPendingJoinGroceryList('');
+      setPickupChoice(shopScheduledClosed ? 'scheduled' : 'flexible');
+      if (shopScheduledClosed) {
+        setPickupAtDate(minVisitTime);
+      }
+      setShowJoinOptionsModal(true);
+      return;
+    }
     setGroceryMode('join');
     setGroceryListText('');
     setShowGroceryModal(true);
@@ -376,14 +424,32 @@ export default function QueueScreen({ route, navigation }) {
       return;
     }
     setPendingJoinGroceryList(list);
-    setPickupChoice('flexible');
+    setPickupChoice(shopScheduledClosed ? 'scheduled' : 'flexible');
+    if (shopScheduledClosed) {
+      setPickupAtDate(minVisitTime);
+    }
     setShowGroceryModal(false);
     setShowJoinOptionsModal(true);
   }
 
   function pickupPayloadFields() {
-    if (pickupChoice !== 'scheduled') return {};
-    return { pickupAt: pickupAtDate.toISOString() };
+    if (shopScheduledClosed || pickupChoice === 'scheduled') {
+      return { pickupAt: pickupAtDate.toISOString() };
+    }
+    return {};
+  }
+
+  function assertSaloonVisitSlotAvailable() {
+    if (!isSaloonShop) return true;
+    if (!shopScheduledClosed && pickupChoice !== 'scheduled') return true;
+    if (isSaloonSlotTaken(queue?.entries, pickupAtDate)) {
+      appAlert(
+        'Time unavailable',
+        'Another customer already has a visit scheduled at this time. Please choose a different time.'
+      );
+      return false;
+    }
+    return true;
   }
 
   function applyJoinSuccess(data) {
@@ -418,22 +484,27 @@ export default function QueueScreen({ route, navigation }) {
 
   async function confirmStandardJoin() {
     const list = String(pendingJoinGroceryList || '').trim();
-    if (!list) {
+    if (!isSaloonShop && !list) {
       appAlert('Grocery list required', 'Your grocery list is empty.');
       return;
     }
-    if (pickupChoice === 'scheduled') {
-      const min = Date.now() + MIN_PICKUP_LEAD_MS;
-      if (pickupAtDate.getTime() < min) {
-        appAlert('Pickup time', 'Please choose another time, approx 2 hours later from now.');
+    if (shopScheduledClosed || pickupChoice === 'scheduled') {
+      if (pickupAtDate.getTime() < minVisitTime.getTime()) {
+        appAlert(
+          'Visit time',
+          shopScheduledClosed
+            ? `Please choose a time on or after the shop opens (${formatNextOpenAt(shopDetails?.nextOpenAt)}).`
+            : 'Please choose another time, approx 2 hours later from now.'
+        );
         return;
       }
     }
+    if (!assertSaloonVisitSlotAvailable()) return;
     if (joining) return;
     setJoining(true);
     try {
       const data = await postJoin({
-        groceryList: list,
+        ...(list ? { groceryList: list } : {}),
         joinKind: 'standard',
         ...pickupPayloadFields(),
       });
@@ -462,13 +533,18 @@ export default function QueueScreen({ route, navigation }) {
       appAlert('Error', 'Choose a queue number to skip to.');
       return;
     }
-    if (pickupChoice === 'scheduled' && mode === 'join') {
-      const min = Date.now() + MIN_PICKUP_LEAD_MS;
-      if (pickupAtDate.getTime() < min) {
-        appAlert('Pickup time', 'Please choose another time, approx 2 hours later from now.');
+    if ((shopScheduledClosed || pickupChoice === 'scheduled') && mode === 'join') {
+      if (pickupAtDate.getTime() < minVisitTime.getTime()) {
+        appAlert(
+          'Visit time',
+          shopScheduledClosed
+            ? `Please choose a time on or after the shop opens (${formatNextOpenAt(shopDetails?.nextOpenAt)}).`
+            : 'Please choose another time, approx 2 hours later from now.'
+        );
         return;
       }
     }
+    if (mode === 'join' && !assertSaloonVisitSlotAvailable()) return;
     if (joining) return;
     setJoining(true);
     try {
@@ -500,7 +576,7 @@ export default function QueueScreen({ route, navigation }) {
       };
       if (mode === 'join') {
         const data = await postJoin({
-          groceryList,
+          ...(groceryList ? { groceryList } : {}),
           joinKind: 'priority_skip',
           ...paymentBody,
           ...pickupPayloadFields(),
@@ -545,7 +621,7 @@ export default function QueueScreen({ route, navigation }) {
 
   async function confirmPaidSkipJoin() {
     const list = String(pendingJoinGroceryList || '').trim();
-    if (!list) {
+    if (!isSaloonShop && !list) {
       appAlert('Grocery list required', 'Your grocery list is empty.');
       return;
     }
@@ -553,7 +629,10 @@ export default function QueueScreen({ route, navigation }) {
       appAlert('Choose a spot', 'Select which queue number you want to move to.');
       return;
     }
-    await payAndSkipToPosition(joinSkipTarget, { mode: 'join', groceryList: list });
+    await payAndSkipToPosition(joinSkipTarget, {
+      mode: 'join',
+      groceryList: list || undefined,
+    });
   }
 
   async function confirmMoveUpInQueue() {
@@ -796,11 +875,14 @@ export default function QueueScreen({ route, navigation }) {
               </>
             ) : (
               <Text style={[styles.modalSub, { color: colors.muted, marginTop: 4 }]}>
-                Join at the end of the line and set when you will pick up groceries.
+                {isSaloonShop
+                  ? 'Join at the end of the line and choose when you want to visit.'
+                  : 'Join at the end of the line and set when you will pick up groceries.'}
               </Text>
             )}
 
-            <Text style={[styles.joinSectionLabel, { color: colors.text }]}>Pickup</Text>
+            <Text style={[styles.joinSectionLabel, { color: colors.text }]}>Visit time</Text>
+            {!shopScheduledClosed ? (
             <TouchableOpacity
               onPress={() => setPickupChoice('flexible')}
               activeOpacity={0.88}
@@ -821,6 +903,7 @@ export default function QueueScreen({ route, navigation }) {
               </View>
               {pickupChoice === 'flexible' ? <Feather name="check-circle" size={20} color={colors.primary} /> : null}
             </TouchableOpacity>
+            ) : null}
 
             <TouchableOpacity
               onPress={() => {
@@ -839,9 +922,15 @@ export default function QueueScreen({ route, navigation }) {
             >
               <Feather name="calendar" size={18} color={colors.primary} />
               <View style={{ marginLeft: 10, flex: 1 }}>
-                <Text style={[styles.pickOptionTitle, { color: colors.text }]}>I will pick up at…</Text>
+                <Text style={[styles.pickOptionTitle, { color: colors.text }]}>
+                  {shopScheduledClosed ? 'When I want to visit' : 'I will pick up at…'}
+                </Text>
                 <Text style={[styles.pickOptionSub, { color: colors.subtle }]}>
-                  Choose a date and time that works for you.
+                  {shopScheduledClosed
+                    ? `Must be on or after shop opens (${formatNextOpenAt(shopDetails?.nextOpenAt)}).`
+                    : isSaloonShop
+                      ? 'One customer per time slot — pick an available time.'
+                      : 'Choose a date and time that works for you.'}
                 </Text>
               </View>
               {pickupChoice === 'scheduled' ? <Feather name="check-circle" size={20} color={colors.primary} /> : null}
@@ -866,17 +955,24 @@ export default function QueueScreen({ route, navigation }) {
                   <View
                     style={[styles.iosPickerShell, { backgroundColor: colors.bg, borderColor: colors.border }]}
                   >
-                    <DateTimePicker
-                      value={pickupAtDate}
-                      mode="datetime"
-                      display="spinner"
-                      minimumDate={new Date()}
-                      themeVariant={isDark ? 'dark' : 'light'}
-                      onChange={(_, date) => {
-                        if (date) setPickupAtDate(date);
-                      }}
-                    />
+                    <React.Suspense fallback={null}>
+                      <IosDateTimePicker
+                        value={pickupAtDate}
+                        mode="datetime"
+                        display="spinner"
+                        minimumDate={minVisitTime}
+                        themeVariant={isDark ? 'dark' : 'light'}
+                        onChange={(_, date) => {
+                          if (date) setPickupAtDate(date);
+                        }}
+                      />
+                    </React.Suspense>
                   </View>
+                ) : null}
+                {isSaloonShop && saloonVisitSlotTaken ? (
+                  <Text style={[styles.slotTakenHint, { color: '#f59e0b' }]}>
+                    This time is already booked. Please choose another slot.
+                  </Text>
                 ) : null}
               </View>
             ) : null}
@@ -897,11 +993,15 @@ export default function QueueScreen({ route, navigation }) {
               <View style={{ width: 12 }} />
               <TouchableOpacity
                 onPress={confirmStandardJoin}
-                disabled={joining}
+                disabled={joining || saloonVisitSlotTaken}
                 activeOpacity={0.9}
                 style={[
                   styles.modalPrimaryBtn,
-                  { backgroundColor: colors.primary, opacity: joining ? 0.7 : 1, flex: 1 },
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: joining || saloonVisitSlotTaken ? 0.7 : 1,
+                    flex: 1,
+                  },
                 ]}
               >
                 <Text style={styles.modalPrimaryText}>{joining ? 'Joining…' : 'Join queue'}</Text>
@@ -1361,6 +1461,12 @@ export default function QueueScreen({ route, navigation }) {
             {shopDetails?.address ? (
               <Text style={[styles.shopAddr, { color: colors.subtle }]}>{shopDetails.address}</Text>
             ) : null}
+            {shopScheduledClosed ? (
+              <Text style={[styles.closedBanner, { color: '#f59e0b' }]}>
+                Shop is closed · Opens {formatNextOpenAt(shopDetails?.nextOpenAt)}. You can still join and
+                choose your visit time.
+              </Text>
+            ) : null}
             <Text style={[styles.sub, { color: colors.muted }]}>You are not in this queue yet.</Text>
             <TouchableOpacity
               style={[styles.joinBtn, { backgroundColor: colors.primary }]}
@@ -1478,6 +1584,7 @@ const styles = StyleSheet.create({
   callTopText: { fontWeight: '800', fontSize: 14 },
   shopName: { marginTop: 10, fontSize: 18, fontWeight: '900' },
   shopAddr: { marginTop: 6, fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  closedBanner: { marginTop: 10, fontSize: 13, fontWeight: '700', lineHeight: 18 },
   actionRow: { marginTop: 16, flexDirection: 'row', alignItems: 'center' },
   queueHasList: { marginTop: 10, fontSize: 13, fontWeight: '800' },
   modalBackdrop: {
@@ -1605,6 +1712,7 @@ const styles = StyleSheet.create({
   timePreviewLabel: { fontSize: 11, fontWeight: '900' },
   timePreviewValue: { fontSize: 16, fontWeight: '900', marginTop: 6 },
   timePreviewTap: { fontSize: 12, fontWeight: '800', marginTop: 8 },
+  slotTakenHint: { marginTop: 10, fontSize: 13, fontWeight: '700', lineHeight: 18 },
   iosPickerShell: {
     marginTop: 10,
     borderRadius: 12,

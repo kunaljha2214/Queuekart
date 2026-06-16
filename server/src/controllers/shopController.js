@@ -3,24 +3,20 @@ const Shop = require('../models/Shop');
 const Queue = require('../models/Queue');
 const { isValidShopSubCategory } = require('../constants/shopSubCategories');
 const { normalizeSaloonServices } = require('../constants/saloonServices');
+const { maybeAutoOpenShop } = require('../utils/shopSchedule');
 
 const ONE_DAY_MS = 1 * 24 * 60 * 60 * 1000;
 
-/** Same visibility rules as nearby: active, open, subscription/grace OK. */
+/** Customer-visible shops: active + subscription/grace OK (includes temporarily closed). */
 function customerListableShopMatch() {
   const graceSince = new Date(Date.now() - ONE_DAY_MS);
   return {
     isActive: true,
-    $and: [
-      { $or: [{ isOpen: true }, { isOpen: { $exists: false } }] },
-      {
-        $or: [
-          { 'subscription.isActive': true },
-          { 'subscription.nextDueAt': { $gt: graceSince } },
-          { subscriptionPaidUntil: { $gt: graceSince } },
-          { subscriptionPaidUntil: null, createdAt: { $gt: graceSince } },
-        ],
-      },
+    $or: [
+      { 'subscription.isActive': true },
+      { 'subscription.nextDueAt': { $gt: graceSince } },
+      { subscriptionPaidUntil: { $gt: graceSince } },
+      { subscriptionPaidUntil: null, createdAt: { $gt: graceSince } },
     ],
   };
 }
@@ -176,10 +172,11 @@ async function listDirectory(req, res, next) {
 
 async function getById(req, res, next) {
   try {
-    const shop = await Shop.findById(req.params.id).populate('owner', 'name phone');
+    let shop = await Shop.findById(req.params.id).populate('owner', 'name phone');
     if (!shop) {
       return res.status(404).json({ message: 'Shop not found' });
     }
+    shop = await maybeAutoOpenShop(shop);
     res.json({ shop });
   } catch (e) {
     next(e);
@@ -195,13 +192,28 @@ async function update(req, res, next) {
     if (!shop) {
       return res.status(404).json({ message: 'Shop not found' });
     }
-    const { name, description, lng, lat, address, isActive, isOpen, subCategory, saloonServices } =
+    const { name, description, lng, lat, address, isActive, isOpen, nextOpenAt, subCategory, saloonServices } =
       req.body;
     if (name != null) shop.name = name;
     if (description != null) shop.description = description;
     if (address != null) shop.address = address;
     if (typeof isActive === 'boolean') shop.isActive = isActive;
-    if (typeof isOpen === 'boolean') shop.isOpen = isOpen;
+    if (typeof isOpen === 'boolean') {
+      if (isOpen) {
+        shop.isOpen = true;
+        shop.nextOpenAt = null;
+      } else {
+        const parsed = nextOpenAt ? new Date(nextOpenAt) : null;
+        if (!parsed || Number.isNaN(parsed.getTime())) {
+          return res.status(400).json({ message: 'Next opening date and time is required when closing the shop' });
+        }
+        if (parsed.getTime() <= Date.now() + 5 * 60 * 1000) {
+          return res.status(400).json({ message: 'Next opening must be at least 5 minutes from now' });
+        }
+        shop.isOpen = false;
+        shop.nextOpenAt = parsed;
+      }
+    }
     if (isValidShopSubCategory(subCategory)) shop.subCategory = subCategory;
     if (saloonServices != null) {
       if (shop.subCategory !== 'saloon') {

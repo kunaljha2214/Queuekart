@@ -19,6 +19,13 @@ const {
   assertUserMayClaimSkipTarget,
   releaseSkipTarget,
 } = require('../services/skipReservationService');
+const {
+  isShopScheduledClosed,
+  isShopCurrentlyOpen,
+  maybeAutoOpenShop,
+  parseDate,
+} = require('../utils/shopSchedule');
+const { isSaloonPickupSlotTaken } = require('../utils/saloonSchedule');
 
 function computeWaitMinutes({ orderedActiveEntries, yourIndex, perRealAheadMinutes }) {
   const ahead = orderedActiveEntries.slice(0, Math.max(0, yourIndex));
@@ -263,12 +270,13 @@ async function getMyQueueHistory(req, res, next) {
   }
 }
 
-function parsePickupAt(raw) {
+function parsePickupAt(raw, options = {}) {
   if (raw === undefined || raw === null || raw === '') return null;
   const d = new Date(raw);
   if (Number.isNaN(d.getTime())) return null;
-  // Customers can schedule pickup, but not too soon (avoid immediate/invalid scheduling).
-  const min = Date.now() + 2 * 60 * 60 * 1000; // 2 hours
+  const defaultMin = Date.now() + 2 * 60 * 60 * 1000;
+  const minAt = options.minAt ? options.minAt.getTime() : defaultMin;
+  const min = Math.max(minAt, Date.now() + 60 * 1000);
   if (d.getTime() < min) return null;
   return d;
 }
@@ -507,13 +515,16 @@ async function skipPosition(req, res, next) {
 async function join(req, res, next) {
   try {
     const io = req.app.get('io');
-    const shop = await Shop.findById(req.params.shopId);
+    let shop = await Shop.findById(req.params.shopId);
     if (!shop || !shop.isActive) {
       return res.status(404).json({ message: 'Shop not found or inactive' });
     }
-    if (shop.isOpen === false) {
-      return res.status(403).json({ message: 'This shop is closed and not accepting new queue joins' });
-    }
+    shop = await maybeAutoOpenShop(shop);
+
+    const scheduledClosed = isShopScheduledClosed(shop);
+    const nextOpenAt = parseDate(shop.nextOpenAt);
+    const minPickupAt = scheduledClosed && nextOpenAt ? nextOpenAt : null;
+
     let queue = await getOrCreateQueue(shop._id);
     const existing = queue.entries.find(
       (e) =>
@@ -563,8 +574,36 @@ async function join(req, res, next) {
       }
     }
 
-    const pickupParsed = parsePickupAt(req.body?.pickupAt);
-    const pickupAt = pickupParsed || undefined;
+    const pickupParsed = parsePickupAt(req.body?.pickupAt, { minAt: minPickupAt });
+    let pickupAt = pickupParsed || undefined;
+
+    if (scheduledClosed) {
+      if (!nextOpenAt) {
+        return res.status(400).json({ message: 'This shop has no scheduled reopening time yet' });
+      }
+      if (!pickupAt) {
+        return res.status(400).json({
+          message: 'Select when you want to visit. Your visit time must be on or after the shop opens.',
+          nextOpenAt: nextOpenAt.toISOString(),
+        });
+      }
+      if (pickupAt.getTime() < nextOpenAt.getTime()) {
+        return res.status(400).json({
+          message: 'Visit time must be on or after the shop opening time',
+          nextOpenAt: nextOpenAt.toISOString(),
+        });
+      }
+    }
+
+    if (shop.subCategory === 'saloon' && pickupAt) {
+      if (isSaloonPickupSlotTaken(queue.entries, pickupAt)) {
+        return res.status(409).json({
+          message:
+            'Another customer already has a visit scheduled at this time. Please choose a different time.',
+          pickupAt: pickupAt.toISOString(),
+        });
+      }
+    }
 
     const orderedBefore = getActiveOrdered(queue);
     const projectedPosition = orderedBefore.length + 1;
@@ -850,12 +889,22 @@ async function normalizePositions(queue) {
 async function ownerNext(req, res, next) {
   try {
     const io = req.app.get('io');
-    const shop = await Shop.findOne({
+    let shop = await Shop.findOne({
       _id: req.params.shopId,
       owner: req.user._id,
     });
     if (!shop) {
       return res.status(404).json({ message: 'Shop not found' });
+    }
+    shop = await maybeAutoOpenShop(shop);
+    if (!isShopCurrentlyOpen(shop)) {
+      const reopen = parseDate(shop.nextOpenAt);
+      return res.status(403).json({
+        message: reopen
+          ? `Shop is closed until ${reopen.toISOString()}`
+          : 'Shop is closed until you open it again',
+        nextOpenAt: reopen ? reopen.toISOString() : null,
+      });
     }
     const queue = await getOrCreateQueue(shop._id);
     const serving = queue.entries.find((e) => e.status === 'serving');

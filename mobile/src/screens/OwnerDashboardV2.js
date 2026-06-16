@@ -1,5 +1,4 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import {
   ActivityIndicator,
   Linking,
@@ -27,7 +26,15 @@ import {
 } from '../constants/adPlacements';
 import { requestInterstitialShow } from '../utils/showInterstitialAd';
 import { appAlert } from '../utils/appAlert';
-import { fetchDeviceCoordinates } from '../utils/deviceLocation';
+import { fetchDeviceCoordinates, formatLocationError, openAppSettings } from '../utils/deviceLocation';
+import { openAndroidDatePicker, openAndroidDateTimePicker } from '../utils/datePicker';
+import {
+  formatNextOpenAt,
+  getDefaultNextOpenAt,
+  isShopScheduledClosed,
+} from '../utils/shopSchedule';
+
+const IosDateTimePicker = React.lazy(() => import('../components/IosDateTimePicker'));
 
 export default function OwnerDashboardV2({ navigation }) {
   const { logout, user } = useAuth();
@@ -68,6 +75,8 @@ export default function OwnerDashboardV2({ navigation }) {
   const [editSaloonServices, setEditSaloonServices] = useState([]);
   const [payingSub, setPayingSub] = useState(false);
   const [togglingShopOpen, setTogglingShopOpen] = useState(false);
+  const [showScheduleCloseModal, setShowScheduleCloseModal] = useState(false);
+  const [scheduleCloseAt, setScheduleCloseAt] = useState(() => getDefaultNextOpenAt());
 
   const colors = useMemo(() => {
     if (isDark) {
@@ -160,12 +169,24 @@ export default function OwnerDashboardV2({ navigation }) {
   const showSubscriptionPay = subscriptionStatusLabel !== 'Active';
 
   const isShopOpen = useMemo(() => activeShop?.isOpen !== false, [activeShop?.isOpen]);
+  const shopClosedUntilLabel = useMemo(
+    () => formatNextOpenAt(activeShop?.nextOpenAt),
+    [activeShop?.nextOpenAt]
+  );
+  const shopIsScheduledClosed = useMemo(
+    () => isShopScheduledClosed(activeShop),
+    [activeShop]
+  );
 
-  async function toggleShopOpen(nextOpen) {
+  async function toggleShopOpen(isOpen, nextOpenAtIso = null) {
     if (!shopId || togglingShopOpen) return;
     try {
       setTogglingShopOpen(true);
-      await client.patch(`/shops/${shopId}`, { isOpen: nextOpen });
+      const payload = { isOpen };
+      if (!isOpen && nextOpenAtIso) {
+        payload.nextOpenAt = nextOpenAtIso;
+      }
+      await client.patch(`/shops/${shopId}`, payload);
       const { data } = await client.get('/shops');
       setShops(data.shops || []);
     } catch (e) {
@@ -173,6 +194,25 @@ export default function OwnerDashboardV2({ navigation }) {
     } finally {
       setTogglingShopOpen(false);
     }
+  }
+
+  function onShopStatusToggle(nextOpen) {
+    if (nextOpen) {
+      toggleShopOpen(true);
+      return;
+    }
+    setScheduleCloseAt(getDefaultNextOpenAt());
+    setShowScheduleCloseModal(true);
+  }
+
+  async function confirmScheduleClose() {
+    const min = Date.now() + 5 * 60 * 1000;
+    if (scheduleCloseAt.getTime() < min) {
+      appAlert('Invalid time', 'Next opening must be at least 5 minutes from now.');
+      return;
+    }
+    await toggleShopOpen(false, scheduleCloseAt.toISOString());
+    setShowScheduleCloseModal(false);
   }
 
   async function openCall(phone) {
@@ -244,10 +284,7 @@ export default function OwnerDashboardV2({ navigation }) {
       setNewShopLat(String(latitude));
       setNewShopLng(String(longitude));
     } catch (e) {
-      setShopLocationError(
-        e?.message ||
-          'Could not detect location. Enter latitude and longitude manually, or tap Retry.'
-      );
+      setShopLocationError(formatLocationError(e));
     } finally {
       setLocatingShop(false);
     }
@@ -667,10 +704,23 @@ export default function OwnerDashboardV2({ navigation }) {
             />
           </View>
           {shopLocationError ? (
-            <Text style={[styles.rowMeta, { color: colors.danger, marginTop: 6 }]}>
-              {shopLocationError}
+            <>
+              <Text style={[styles.rowMeta, { color: colors.danger, marginTop: 6 }]}>
+                {shopLocationError}
+              </Text>
+              {shopLocationError.toLowerCase().includes('permission') ? (
+                <TouchableOpacity onPress={openAppSettings} style={{ marginTop: 6 }}>
+                  <Text style={[styles.rowMeta, { color: colors.primary, fontWeight: '700' }]}>
+                    Open app settings
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </>
+          ) : (
+            <Text style={[styles.rowMeta, { color: colors.textSubtle, marginTop: 6 }]}>
+              Allow location access, or enter latitude/longitude below. Emulator: ⋮ → Location.
             </Text>
-          ) : null}
+          )}
           <TouchableOpacity
             style={[
               styles.filterBtn,
@@ -761,7 +811,9 @@ export default function OwnerDashboardV2({ navigation }) {
           <View style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
             <Text style={[styles.shopStatusTitleInline, { color: colors.text }]}>Shop status</Text>
             <Text style={[styles.shopStatusSubInline, { color: colors.textSubtle }]}>
-              Open + active subscription: visible to all customer, Closed : hidden from customers.
+              {shopIsScheduledClosed && shopClosedUntilLabel
+                ? `Closed until ${shopClosedUntilLabel}. Customers can still join for later.`
+                : 'Open shops accept queue joins now. Close to schedule the next opening time.'}
             </Text>
           </View>
           {togglingShopOpen ? (
@@ -769,7 +821,7 @@ export default function OwnerDashboardV2({ navigation }) {
           ) : (
             <Switch
               value={isShopOpen}
-              onValueChange={toggleShopOpen}
+              onValueChange={onShopStatusToggle}
               trackColor={{ false: colors.border, true: colors.primaryBg }}
               thumbColor={Platform.OS === 'android' ? colors.primary : undefined}
               ios_backgroundColor={colors.border}
@@ -1076,6 +1128,13 @@ export default function OwnerDashboardV2({ navigation }) {
                 style={[styles.rangeField, { borderColor: colors.border, backgroundColor: colors.inputBg }]}
                 onPress={() => {
                   setActiveRangePreset('custom');
+                  if (Platform.OS === 'android') {
+                    openAndroidDatePicker({
+                      value: historyFromDate || new Date(),
+                      onSelect: setHistoryFromDate,
+                    });
+                    return;
+                  }
                   setShowFromDatePicker(true);
                 }}
                 activeOpacity={0.85}
@@ -1089,6 +1148,13 @@ export default function OwnerDashboardV2({ navigation }) {
                 style={[styles.rangeField, { borderColor: colors.border, backgroundColor: colors.inputBg }]}
                 onPress={() => {
                   setActiveRangePreset('custom');
+                  if (Platform.OS === 'android') {
+                    openAndroidDatePicker({
+                      value: historyToDate || new Date(),
+                      onSelect: setHistoryToDate,
+                    });
+                    return;
+                  }
                   setShowToDatePicker(true);
                 }}
                 activeOpacity={0.85}
@@ -1107,27 +1173,31 @@ export default function OwnerDashboardV2({ navigation }) {
               </TouchableOpacity>
             </View>
           </View>
-          {showFromDatePicker ? (
-            <DateTimePicker
-              value={historyFromDate || new Date()}
-              mode="date"
-              display="default"
-              onChange={(_, selectedDate) => {
-                setShowFromDatePicker(false);
-                if (selectedDate) setHistoryFromDate(selectedDate);
-              }}
-            />
+          {Platform.OS === 'ios' && showFromDatePicker ? (
+            <React.Suspense fallback={null}>
+              <IosDateTimePicker
+                value={historyFromDate || new Date()}
+                mode="date"
+                display="default"
+                onChange={(_, selectedDate) => {
+                  setShowFromDatePicker(false);
+                  if (selectedDate) setHistoryFromDate(selectedDate);
+                }}
+              />
+            </React.Suspense>
           ) : null}
-          {showToDatePicker ? (
-            <DateTimePicker
-              value={historyToDate || new Date()}
-              mode="date"
-              display="default"
-              onChange={(_, selectedDate) => {
-                setShowToDatePicker(false);
-                if (selectedDate) setHistoryToDate(selectedDate);
-              }}
-            />
+          {Platform.OS === 'ios' && showToDatePicker ? (
+            <React.Suspense fallback={null}>
+              <IosDateTimePicker
+                value={historyToDate || new Date()}
+                mode="date"
+                display="default"
+                onChange={(_, selectedDate) => {
+                  setShowToDatePicker(false);
+                  if (selectedDate) setHistoryToDate(selectedDate);
+                }}
+              />
+            </React.Suspense>
           ) : null}
           {historyLoading ? (
             <ActivityIndicator style={{ marginTop: 20 }} />
@@ -1155,6 +1225,74 @@ export default function OwnerDashboardV2({ navigation }) {
           )}
         </>
       )}
+      <Modal
+        visible={showScheduleCloseModal}
+        animationType="fade"
+        transparent
+        onRequestClose={() => setShowScheduleCloseModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Schedule next opening</Text>
+            <Text style={[styles.rowMeta, { color: colors.textSubtle, marginBottom: 12 }]}>
+              Customers will still see your shop and can join the queue for after this time.
+            </Text>
+            <TouchableOpacity
+              style={[styles.input, { backgroundColor: colors.inputBg, borderColor: colors.border }]}
+              onPress={() => {
+                if (Platform.OS === 'android') {
+                  openAndroidDateTimePicker({
+                    value: scheduleCloseAt,
+                    minimumDate: new Date(),
+                    onChange: setScheduleCloseAt,
+                  });
+                  return;
+                }
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={{ color: colors.text, fontWeight: '600' }}>
+                {scheduleCloseAt.toLocaleString()}
+              </Text>
+              <Text style={{ color: colors.textSubtle, marginTop: 4 }}>
+                {Platform.OS === 'android' ? 'Tap to change date & time' : 'Use picker below'}
+              </Text>
+            </TouchableOpacity>
+            {Platform.OS === 'ios' ? (
+              <React.Suspense fallback={null}>
+                <IosDateTimePicker
+                  value={scheduleCloseAt}
+                  mode="datetime"
+                  minimumDate={new Date()}
+                  display="default"
+                  onChange={(_, date) => {
+                    if (date) setScheduleCloseAt(date);
+                  }}
+                />
+              </React.Suspense>
+            ) : null}
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { borderColor: colors.border, backgroundColor: colors.inputBg }]}
+                onPress={() => setShowScheduleCloseModal(false)}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.modalBtnText, { color: colors.textMuted }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtnPrimary, { backgroundColor: colors.primary }]}
+                onPress={confirmScheduleClose}
+                disabled={togglingShopOpen}
+                activeOpacity={0.88}
+              >
+                <Text style={styles.modalBtnPrimaryText}>
+                  {togglingShopOpen ? 'Saving…' : 'Close shop'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
       <Modal
         visible={showEditShopModal}
         animationType="fade"
